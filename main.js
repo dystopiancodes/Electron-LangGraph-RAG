@@ -74,34 +74,42 @@ function sendLogUpdate(step, log) {
 }
 
 // Update the invoke-rag handler
-ipcMain.handle("invoke-rag", async (event, { question, model }) => {
-  try {
-    const { runRAG, setSearchUrls } = require("./src/rag");
-    const tavilyApiKey = store.get("tavilyApiKey");
-    const searchUrls = store.get("searchUrls", []);
-    setSearchUrls(searchUrls, sendLogUpdate);
-    sendStepUpdate("route");
-    console.log(
-      "Starting RAG process with question:",
-      question,
-      "and model:",
-      model
-    );
-    const result = await runRAG(
-      question,
-      model,
-      sendStepUpdate,
-      sendLogUpdate,
-      tavilyApiKey
-    );
-    console.log("RAG process completed. Result:", result);
-    return result;
-  } catch (error) {
-    console.error("Error in invoke-rag handler:", error);
-    sendLogUpdate("error", `Error in invoke-rag handler: ${error.message}`);
-    return { error: error.message };
+ipcMain.handle(
+  "invoke-rag",
+  async (event, { question, model, isTavilySearchEnabled }) => {
+    try {
+      const { runRAG, setSearchUrls } = require("./src/rag");
+      const tavilyApiKey = store.get("tavilyApiKey");
+      const searchUrls = store.get("searchUrls", []);
+      const selectedFolderPath = store.get("selectedFolder");
+      setSearchUrls(searchUrls, sendLogUpdate);
+      sendStepUpdate("route");
+      console.log(
+        "Starting RAG process with question:",
+        question,
+        "model:",
+        model,
+        "Tavily search enabled:",
+        isTavilySearchEnabled
+      );
+      const result = await runRAG(
+        question,
+        model,
+        sendStepUpdate,
+        sendLogUpdate,
+        tavilyApiKey,
+        isTavilySearchEnabled,
+        selectedFolderPath
+      );
+      console.log("RAG process completed. Result:", result);
+      return result;
+    } catch (error) {
+      console.error("Error in invoke-rag handler:", error);
+      sendLogUpdate("error", `Error in invoke-rag handler: ${error.message}`);
+      return { error: error.message };
+    }
   }
-});
+);
 
 // Update this handler for test-ollama
 ipcMain.handle("test-ollama", async (event, model) => {
@@ -172,13 +180,16 @@ ipcMain.handle("load-or-create-vector-store", async (event, folderPath) => {
     const sendProgress = (progress) => {
       event.sender.send("indexing-progress", progress);
     };
-    await loadOrCreateVectorStore(folderPath, sendProgress);
-    return {
-      success: true,
-      message: "Vector store loaded or created successfully",
-    };
+    const result = await loadOrCreateVectorStore(folderPath, sendProgress);
+    console.log("Vector store operation result:", result);
+    return result;
   } catch (error) {
     console.error("Error in load-or-create-vector-store handler:", error);
     return { success: false, error: error.message };
   }
+});
+
+// Add this new IPC handler
+ipcMain.handle("set-tavily-search-enabled", (event, isEnabled) => {
+  store.set("tavilySearchEnabled", isEnabled);
 });

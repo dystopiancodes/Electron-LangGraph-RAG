@@ -40,6 +40,7 @@ const { DirectoryLoader } = require("langchain/document_loaders/fs/directory");
 const { TextLoader } = require("langchain/document_loaders/fs/text");
 const { JSONLoader } = require("langchain/document_loaders/fs/json");
 const { CSVLoader } = require("langchain/document_loaders/fs/csv");
+const { FaissStore } = require("langchain/vectorstores/faiss");
 
 // Add this function near the top of the file, after the imports
 async function checkOllamaServer(model) {
@@ -343,7 +344,10 @@ const retrieve = async (state) => {
     if (!state.question || typeof state.question !== "string") {
       throw new Error(`Invalid question: ${JSON.stringify(state.question)}`);
     }
-    const documents = await global.vectorStore.similaritySearch(state.question);
+    const documents = await global.vectorStore.similaritySearch(
+      state.question,
+      5
+    );
     console.log(`Retrieved ${documents.length} documents`);
     if (!Array.isArray(documents)) {
       throw new Error(
@@ -625,6 +629,7 @@ async function createEmbeddings() {
 
 // Update the createVectorStore function
 async function createVectorStore(folderPath) {
+  console.log("Creating new vector store...");
   const loaders = {
     ".txt": (path) => new TextLoader(path),
     ".json": (path) => new JSONLoader(path),
@@ -646,7 +651,11 @@ async function createVectorStore(folderPath) {
     const docs = await loader.load();
     console.log(`Loaded ${docs.length} documents`);
     const embeddings = await createEmbeddings();
-    const vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
+    const vectorStore = await FaissStore.fromDocuments(docs, embeddings);
+    console.log("Vector store created successfully");
+    const vectorStorePath = path.join(folderPath, ".vector_store");
+    await vectorStore.save(vectorStorePath);
+    console.log(`Vector store saved to ${vectorStorePath}`);
     return vectorStore;
   } catch (error) {
     console.error("Error in createVectorStore:", error);
@@ -656,37 +665,48 @@ async function createVectorStore(folderPath) {
 
 // Update the loadOrCreateVectorStore function
 async function loadOrCreateVectorStore(folderPath, progressCallback) {
+  const vectorStorePath = path.join(folderPath, ".vector_store");
   let vectorStore;
 
   try {
-    console.log("Creating new vector store...");
+    // Check if vector store exists
+    await fs.access(vectorStorePath);
+    console.log("Loading existing vector store...");
     progressCallback({
-      status: "start",
+      status: "loading",
+      message: "Loading existing vector store...",
+    });
+    const embeddings = await createEmbeddings();
+    vectorStore = await FaissStore.load(vectorStorePath, embeddings);
+    console.log("Existing vector store loaded successfully");
+    progressCallback({
+      status: "loaded",
+      message: "Existing vector store loaded successfully",
+    });
+  } catch (error) {
+    console.log("No existing vector store found. Creating new one...");
+    progressCallback({
+      status: "creating",
       message: "Creating new vector store...",
     });
     vectorStore = await createVectorStore(folderPath);
     progressCallback({
-      status: "complete",
-      message: "Vector store created successfully",
+      status: "created",
+      message: "New vector store created successfully",
     });
-  } catch (createError) {
-    console.error("Error creating vector store:", createError);
-    progressCallback({
-      status: "error",
-      message: `Failed to create vector store: ${createError.message}`,
-    });
-    throw new Error(`Failed to create vector store: ${createError.message}`);
   }
 
   try {
+    console.log("Checking for new files...");
     progressCallback({
       status: "updating",
       message: "Checking for new files...",
     });
-    await updateVectorStore(folderPath, vectorStore);
+    vectorStore = await updateVectorStore(folderPath, vectorStore);
+    console.log("Vector store update check completed");
     progressCallback({
-      status: "complete",
-      message: "Vector store updated successfully",
+      status: "updated",
+      message: "Vector store update check completed",
     });
   } catch (updateError) {
     console.error("Error updating vector store:", updateError);
@@ -694,13 +714,11 @@ async function loadOrCreateVectorStore(folderPath, progressCallback) {
       status: "error",
       message: `Error updating vector store: ${updateError.message}`,
     });
-    // Continue with the existing vector store even if update fails
   }
 
-  // Store the vectorStore in a global variable or some persistent storage
+  // Store the vectorStore in a global variable
   global.vectorStore = vectorStore;
 
-  // Return a simple success message instead of the vectorStore object
   return {
     success: true,
     message: "Vector store loaded or created successfully",
@@ -721,13 +739,42 @@ async function updateVectorStore(folderPath, vectorStore) {
 
   const loader = new DirectoryLoader(folderPath, loaders, {
     ignoreFiles: (file) => {
-      const ignoredExtensions = [".DS_Store", ".yaml", ".pkl", ".npy", ".bin"];
+      const ignoredExtensions = [
+        ".DS_Store",
+        ".yaml",
+        ".pkl",
+        ".npy",
+        ".bin",
+        ".index",
+      ];
       return ignoredExtensions.some((ext) => file.endsWith(ext));
     },
   });
 
   try {
     const docs = await loader.load();
+    console.log(`Loaded ${docs.length} documents`);
+
+    let needsReinitialization = false;
+    try {
+      // Try to perform a similarity search with a dummy query
+      await vectorStore.similaritySearch("test query", 1);
+    } catch (error) {
+      console.error("Error performing similarity search:", error);
+      needsReinitialization = true;
+    }
+
+    if (needsReinitialization) {
+      console.log("Reinitializing vector store due to error...");
+      const embeddings = await createEmbeddings();
+      vectorStore = await FaissStore.fromDocuments(docs, embeddings);
+      const vectorStorePath = path.join(folderPath, ".vector_store");
+      await vectorStore.save(vectorStorePath);
+      console.log("Vector store reinitialized and saved successfully");
+      return vectorStore;
+    }
+
+    // If we don't need to reinitialize, proceed with updating
     const existingDocs = await vectorStore.similaritySearch("", docs.length);
     const newDocs = docs.filter(
       (doc) =>
@@ -741,9 +788,14 @@ async function updateVectorStore(folderPath, vectorStore) {
         `Adding ${newDocs.length} new documents to the vector store...`
       );
       const embeddings = await createEmbeddings();
-      await vectorStore.addDocuments(newDocs, embeddings);
-      await vectorStore.save(path.join(folderPath, ".vector_store"));
+      await vectorStore.addDocuments(newDocs);
+      const vectorStorePath = path.join(folderPath, ".vector_store");
+      await vectorStore.save(vectorStorePath);
+      console.log("Vector store updated and saved successfully");
+    } else {
+      console.log("No new documents found. Vector store is up to date.");
     }
+    return vectorStore;
   } catch (error) {
     console.error("Error in updateVectorStore:", error);
     throw error;
@@ -756,14 +808,19 @@ async function runRAG(
   model,
   sendStepUpdate,
   logUpdateFunction,
-  tavilyApiKey
+  tavilyApiKey,
+  isTavilySearchEnabled,
+  selectedFolderPath
 ) {
   sendLogUpdate = logUpdateFunction;
   let relevantDocs = [];
   try {
     console.log("Starting RAG pipeline");
     sendLogUpdate("start", "Starting RAG pipeline");
-    sendLogUpdate("start", JSON.stringify({ question, model }, null, 2));
+    sendLogUpdate(
+      "start",
+      JSON.stringify({ question, model, isTavilySearchEnabled }, null, 2)
+    );
 
     if (!question || typeof question !== "string") {
       throw new Error(`Invalid question: ${JSON.stringify(question)}`);
@@ -786,20 +843,23 @@ async function runRAG(
     sendStepUpdate("route");
     sendLogUpdate("route", `Original question: "${question}"`);
 
-    const routeResponse = await jsonModeLlm(
-      `${QUESTION_ROUTER_SYSTEM_TEMPLATE}\n\nHuman: ${question}`
-    );
-    console.log("Route response:", routeResponse);
-    sendLogUpdate(
-      "route",
-      `Router decision: ${JSON.stringify(routeResponse, null, 2)}`
-    );
+    let routeDecision = "vectorstore";
+    if (isTavilySearchEnabled) {
+      const routeResponse = await jsonModeLlm(
+        `${QUESTION_ROUTER_SYSTEM_TEMPLATE}\n\nHuman: ${question}`
+      );
+      console.log("Route response:", routeResponse);
+      sendLogUpdate(
+        "route",
+        `Router decision: ${JSON.stringify(routeResponse, null, 2)}`
+      );
+      routeDecision = routeResponse.datasource;
+    }
 
-    const routeDecision = routeResponse.datasource;
     console.log("Route decision:", routeDecision);
     sendLogUpdate("route", `Routed to: ${routeDecision}`);
 
-    if (routeDecision === "web_search") {
+    if (routeDecision === "web_search" && isTavilySearchEnabled) {
       console.log("Performing web search");
       sendStepUpdate("web_search");
       sendLogUpdate("web_search", "Performing web search...");
@@ -830,11 +890,20 @@ async function runRAG(
       sendStepUpdate("retrieve");
       sendLogUpdate("retrieve", "Retrieving relevant documents...");
       try {
-        const folderPath = await ipcRenderer.invoke("get-selected-folder");
-        if (!folderPath) {
+        if (!selectedFolderPath) {
           throw new Error("No folder selected. Please select a folder first.");
         }
-        retriever = await loadOrCreateVectorStore(folderPath);
+        const result = await loadOrCreateVectorStore(
+          selectedFolderPath,
+          (progress) => {
+            sendLogUpdate("retrieve", progress.message);
+          }
+        );
+        if (result.success) {
+          retriever = result.retriever;
+        } else {
+          throw new Error(result.message);
+        }
         const { documents } = await retrieve({ question });
         if (!documents || documents.length === 0) {
           throw new Error("No valid documents retrieved");
@@ -868,16 +937,12 @@ async function runRAG(
           sendLogUpdate("grade", JSON.stringify(gradedDocs, null, 2));
 
           if (relevantDocs.length === 0) {
-            console.log("No relevant documents found, transforming query");
-            sendStepUpdate("transform");
-            sendLogUpdate("transform", "Transforming query...");
-            const betterQuestion = await rewriter.invoke({ question });
-            console.log("Transformed question:", betterQuestion);
-            sendLogUpdate(
-              "transform",
-              JSON.stringify({ betterQuestion }, null, 2)
-            );
-            // Here you might want to restart the retrieval process with the better question
+            console.log("No relevant documents found");
+            sendLogUpdate("grade", "No relevant documents found");
+            return {
+              generation:
+                "I don't have enough information to answer this question.",
+            };
           }
         } catch (error) {
           console.error("Error in document grading:", error);

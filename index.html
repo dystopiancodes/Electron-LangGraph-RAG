@@ -36,6 +36,10 @@
       .hidden {
         display: none;
       }
+      input:checked ~ .dot {
+        transform: translateX(100%);
+        background-color: #48bb78;
+      }
     </style>
   </head>
   <body class="bg-gray-100 p-8">
@@ -86,6 +90,20 @@
             Save API Key
           </button>
         </div>
+      </div>
+
+      <!-- Add this after the Tavily API Key input -->
+      <div class="flex items-center mt-2">
+        <label class="flex items-center cursor-pointer">
+          <div class="relative">
+            <input type="checkbox" id="tavily-search-toggle" class="sr-only" />
+            <div class="block bg-gray-600 w-14 h-8 rounded-full"></div>
+            <div
+              class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition"
+            ></div>
+          </div>
+          <div class="ml-3 text-gray-700 font-medium">Enable Tavily Search</div>
+        </label>
       </div>
 
       <!-- Replace the existing folder selection div with this -->
@@ -188,6 +206,18 @@
         generate: [],
       };
 
+      let isTavilySearchEnabled = false;
+
+      document
+        .getElementById("tavily-search-toggle")
+        .addEventListener("change", function () {
+          isTavilySearchEnabled = this.checked;
+          ipcRenderer.invoke(
+            "set-tavily-search-enabled",
+            isTavilySearchEnabled
+          );
+        });
+
       async function loadModels() {
         try {
           const models = await ipcRenderer.invoke("list-ollama-models");
@@ -249,6 +279,7 @@
           const result = await ipcRenderer.invoke("invoke-rag", {
             question,
             model,
+            isTavilySearchEnabled,
           });
           if (result.error) {
             document.getElementById(
@@ -507,6 +538,12 @@
           }
         }
       }
+
+      // Add this event listener
+      ipcRenderer.on("indexing-progress", (event, progress) => {
+        const progressElement = document.getElementById("indexing-progress");
+        progressElement.textContent = progress.message;
+      });
 
       // Add this to your existing script
       async function loadSavedFolder() {
