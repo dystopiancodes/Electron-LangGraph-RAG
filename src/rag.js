@@ -98,13 +98,6 @@ async function jsonModeLlm(input) {
           console.error("Failed to parse extracted JSON:", e);
         }
       }
-
-      // If JSON extraction fails, try to infer the response
-      if (result.toLowerCase().includes("yes")) {
-        return { score: "yes" };
-      } else if (result.toLowerCase().includes("no")) {
-        return { score: "no" };
-      }
     }
 
     console.error("Unexpected jsonModeLlm result:", result);
@@ -344,98 +337,93 @@ const generate = async (state) => {
 
 const gradeDocuments = async (state) => {
   console.log("---CHECK DOCUMENT RELEVANCE TO QUESTION---");
+  sendLogUpdate("grade", "Starting document grading process");
   const relevantDocs = [];
   if (!state.documents || !Array.isArray(state.documents)) {
     console.error("Invalid documents:", state.documents);
+    sendLogUpdate("grade", "Error: Invalid documents received");
     return { documents: [] };
   }
   for (let i = 0; i < state.documents.length; i++) {
     const doc = state.documents[i];
     try {
       console.log(`Grading document ${i + 1}/${state.documents.length}`);
+      sendLogUpdate(
+        "grade",
+        `Grading document ${i + 1}/${state.documents.length}`
+      );
       if (!doc || typeof doc !== "object") {
         console.error("Invalid document object:", doc);
+        sendLogUpdate(
+          "grade",
+          `Error: Invalid document object for document ${i + 1}`
+        );
         continue;
       }
       if (typeof doc.pageContent !== "string") {
         console.error("Invalid pageContent:", doc.pageContent);
+        sendLogUpdate(
+          "grade",
+          `Error: Invalid pageContent for document ${i + 1}`
+        );
         continue;
       }
       const content = doc.pageContent;
       console.log(`\nDocument ${i + 1} content:`, content);
-      sendLogUpdate(
-        "grade",
-        `\n--- Document ${i + 1} ---\nContent: ${content}`
-      );
+      sendLogUpdate("grade", `\nDocument ${i + 1} content: ${content}`);
 
-      // Construct the full prompt for grading
-      const fullPrompt = `You are a grader assessing relevance of a retrieved document to a user question.
-Here is the retrieved document:
+      const promptForGrading = `
+Question: ${state.question}
 
-<document>
-${content}
-</document>
+Document content: ${content}
 
-Here is the user question:
-<question>
-${state.question}
-</question>
+Is this document relevant to the question? Respond with a JSON object with a single key 'score' and value 'yes' or 'no'.
+`;
+      console.log("Prompt for grading:", promptForGrading);
+      sendLogUpdate("grade", `Prompt for grading:\n${promptForGrading}`);
 
-If the document contains keywords related to the user question, grade it as relevant.
-It does not need to be a stringent test. The goal is to filter out erroneous retrievals.
-Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question.
-Provide the binary score as a JSON with a single key 'score' and no preamble or explanation.`;
-
-      console.log(`\nFull grading prompt for document ${i + 1}:`, fullPrompt);
-      sendLogUpdate("grade", `\nFull grading prompt:\n${fullPrompt}`);
-
-      const gradeResponse = await retrievalGrader.invoke({
-        question: state.question,
-        content: content,
-      });
+      const gradeResponse = await jsonModeLlm(promptForGrading);
       console.log(`\nRaw grade response for document ${i + 1}:`, gradeResponse);
       sendLogUpdate(
         "grade",
-        `\nRaw grade response:\n${JSON.stringify(gradeResponse, null, 2)}`
+        `\nRaw grade response for document ${i + 1}:\n${JSON.stringify(
+          gradeResponse,
+          null,
+          2
+        )}`
       );
 
       let grade;
-      if (typeof gradeResponse === "object" && gradeResponse !== null) {
+      if (
+        typeof gradeResponse === "object" &&
+        gradeResponse !== null &&
+        gradeResponse.score
+      ) {
         grade = gradeResponse;
-      } else if (typeof gradeResponse === "string") {
-        // Try to extract JSON from the string response
-        const match = gradeResponse.match(/\{.*\}/s);
-        if (match) {
-          try {
-            grade = JSON.parse(match[0]);
-          } catch (e) {
-            console.error("Failed to parse extracted JSON:", e);
-            grade = {
-              score: gradeResponse.toLowerCase().includes("yes") ? "yes" : "no",
-            };
-          }
-        } else {
-          grade = {
-            score: gradeResponse.toLowerCase().includes("yes") ? "yes" : "no",
-          };
-        }
       } else {
-        console.error("Unexpected grade response type:", typeof gradeResponse);
-        grade = { score: "no" };
+        console.log(
+          `Invalid JSON response for document ${i + 1}. Skipping this document.`
+        );
+        sendLogUpdate(
+          "grade",
+          `Invalid JSON response for document ${i + 1}. Skipping this document.`
+        );
+        continue;
       }
 
       console.log(`Document ${i + 1} grade:`, grade);
       sendLogUpdate(
         "grade",
-        `\nFinal grade: ${JSON.stringify(grade, null, 2)}`
+        `\nFinal grade for document ${i + 1}: ${JSON.stringify(grade, null, 2)}`
       );
+
       if (grade.score === "yes") {
         console.log(`---GRADE: DOCUMENT ${i + 1} RELEVANT---`);
-        sendLogUpdate("grade", `\nResult: DOCUMENT RELEVANT`);
+        sendLogUpdate("grade", `\nResult: DOCUMENT ${i + 1} RELEVANT`);
         relevantDocs.push(doc);
       } else {
         console.log(`---GRADE: DOCUMENT ${i + 1} NOT RELEVANT---`);
-        sendLogUpdate("grade", `\nResult: DOCUMENT NOT RELEVANT`);
+        sendLogUpdate("grade", `\nResult: DOCUMENT ${i + 1} NOT RELEVANT`);
       }
 
       // Log the full grading information
@@ -443,7 +431,7 @@ Provide the binary score as a JSON with a single key 'score' and no preamble or 
         documentIndex: i + 1,
         question: state.question,
         documentContent: content,
-        fullPrompt: fullPrompt,
+        promptForGrading: promptForGrading,
         gradeResponse: gradeResponse,
         finalGrade: grade,
       };
@@ -453,7 +441,11 @@ Provide the binary score as a JSON with a single key 'score' and no preamble or 
       );
       sendLogUpdate(
         "grade",
-        `\nFull grading information:\n${JSON.stringify(gradingLog, null, 2)}`
+        `\nFull grading information for document ${i + 1}:\n${JSON.stringify(
+          gradingLog,
+          null,
+          2
+        )}`
       );
     } catch (error) {
       console.error(`Error grading document ${i + 1}:`, error);
@@ -464,6 +456,10 @@ Provide the binary score as a JSON with a single key 'score' and no preamble or 
       console.error("Problematic document:", JSON.stringify(doc, null, 2));
     }
   }
+  sendLogUpdate(
+    "grade",
+    `Grading process completed. ${relevantDocs.length} relevant documents found.`
+  );
   return { documents: relevantDocs };
 };
 
