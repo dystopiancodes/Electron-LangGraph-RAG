@@ -932,17 +932,38 @@ async function runRAG(
             documents,
           });
           console.log("Graded documents:", gradedDocs);
-          relevantDocs = gradedDocs.documents; // Update relevantDocs here
+          relevantDocs = gradedDocs.documents;
           console.log("Relevant documents:", relevantDocs);
           sendLogUpdate("grade", JSON.stringify(gradedDocs, null, 2));
 
           if (relevantDocs.length === 0) {
-            console.log("No relevant documents found");
-            sendLogUpdate("grade", "No relevant documents found");
-            return {
-              generation:
-                "I don't have enough information to answer this question.",
-            };
+            console.log("No relevant documents found, transforming query");
+            sendStepUpdate("transform");
+            sendLogUpdate("transform", "Transforming query...");
+            const betterQuestion = await transformQuery({ question });
+            console.log("Transformed question:", betterQuestion);
+            sendLogUpdate(
+              "transform",
+              JSON.stringify({ betterQuestion }, null, 2)
+            );
+
+            // Retry retrieval with the transformed question
+            console.log("Retrying retrieval with transformed question");
+            sendStepUpdate("retrieve");
+            sendLogUpdate(
+              "retrieve",
+              "Retrieving documents with transformed query..."
+            );
+            const { documents: newDocuments } = await retrieve({
+              question: betterQuestion.question,
+            });
+            const newGradedDocs = await gradeDocuments({
+              question: betterQuestion.question,
+              documents: newDocuments,
+            });
+            relevantDocs = newGradedDocs.documents;
+            console.log("New relevant documents:", relevantDocs);
+            sendLogUpdate("grade", JSON.stringify(newGradedDocs, null, 2));
           }
         } catch (error) {
           console.error("Error in document grading:", error);
@@ -954,6 +975,19 @@ async function runRAG(
         sendLogUpdate("error", `Error: ${error.message}`);
         return { error: `Document processing failed: ${error.message}` };
       }
+    }
+
+    if (relevantDocs.length === 0) {
+      console.log("No relevant documents found after transformation");
+      sendLogUpdate(
+        "generate",
+        "No relevant documents found. Generating answer based on general knowledge."
+      );
+      // Proceed with generation using only the question
+      const generatedAnswer = await llm(`Question: ${question}\n\nAnswer:`);
+      console.log("Generated answer:", generatedAnswer);
+      sendLogUpdate("generate", JSON.stringify({ generatedAnswer }, null, 2));
+      return { generation: generatedAnswer };
     }
 
     console.log("Generating answer");
