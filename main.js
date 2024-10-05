@@ -20,7 +20,6 @@ const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 global.XMLHttpRequest = XMLHttpRequest;
 
 const { app, BrowserWindow, ipcMain } = require("electron");
-const path = require("path");
 const Store = require("electron-store");
 
 const store = new Store();
@@ -147,4 +146,39 @@ ipcMain.handle("save-selected-model", async (event, model) => {
 
 ipcMain.handle("get-selected-model", async () => {
   return store.get("selectedModel", "");
+});
+
+// Add folder selection and vector store management handlers
+const { dialog } = require("electron");
+const fs = require("fs").promises;
+
+ipcMain.handle("select-folder", async () => {
+  const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+  if (!result.canceled) {
+    const folderPath = result.filePaths[0];
+    store.set("selectedFolder", folderPath);
+    return folderPath;
+  }
+  return null;
+});
+
+ipcMain.handle("get-selected-folder", () => {
+  return store.get("selectedFolder", null);
+});
+
+ipcMain.handle("load-or-create-vector-store", async (event, folderPath) => {
+  try {
+    const { loadOrCreateVectorStore } = require("./src/rag");
+    const sendProgress = (progress) => {
+      event.sender.send("indexing-progress", progress);
+    };
+    await loadOrCreateVectorStore(folderPath, sendProgress);
+    return {
+      success: true,
+      message: "Vector store loaded or created successfully",
+    };
+  } catch (error) {
+    console.error("Error in load-or-create-vector-store handler:", error);
+    return { success: false, error: error.message };
+  }
 });

@@ -1,6 +1,20 @@
 // At the top of the file, add:
 let sendLogUpdate;
 
+function tryRequire(moduleName) {
+  try {
+    return require(moduleName);
+  } catch (e) {
+    console.warn(
+      `Optional dependency ${moduleName} is not installed. Some functionality may be limited.`
+    );
+    return null;
+  }
+}
+
+// Use tryRequire for optional dependencies
+const { PDFLoader } = tryRequire("langchain/document_loaders/fs/pdf") || {};
+
 const { StateGraph, END, START } = require("@langchain/langgraph");
 const { ChatOllama } = require("@langchain/community/chat_models/ollama");
 const { OllamaEmbeddings } = require("@langchain/community/embeddings/ollama");
@@ -20,6 +34,39 @@ const {
 const { Document } = require("@langchain/core/documents");
 const { Runnable } = require("@langchain/core/runnables");
 const { retry } = require("@langchain/core/utils/async_caller");
+const fs = require("fs").promises;
+const path = require("path");
+const { DirectoryLoader } = require("langchain/document_loaders/fs/directory");
+const { TextLoader } = require("langchain/document_loaders/fs/text");
+const { JSONLoader } = require("langchain/document_loaders/fs/json");
+const { CSVLoader } = require("langchain/document_loaders/fs/csv");
+
+// Add this function near the top of the file, after the imports
+async function checkOllamaServer(model) {
+  try {
+    const response = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: model,
+        prompt: "Test",
+        stream: false,
+      }),
+    });
+    if (response.ok) {
+      console.log("Ollama server is running.");
+      return true;
+    } else {
+      console.error("Error connecting to Ollama server:", response.statusText);
+      return false;
+    }
+  } catch (error) {
+    console.error("Error connecting to Ollama server:", error.message);
+    return false;
+  }
+}
 
 // Replace the existing callOllama function with this updated version
 async function callOllama(model, prompt, isJson = false) {
@@ -287,18 +334,16 @@ const webSearchTool = new TavilySearchResults({
 const retrieve = async (state) => {
   console.log("---RETRIEVE---");
   try {
-    if (!retriever) {
-      console.log("Initializing vector store");
-      retriever = await initializeVectorStore();
-    }
-    if (!retriever) {
-      throw new Error("Failed to initialize retriever");
+    if (!global.vectorStore) {
+      throw new Error(
+        "Vector store not initialized. Please select a folder first."
+      );
     }
     console.log("Invoking retriever with question:", state.question);
     if (!state.question || typeof state.question !== "string") {
       throw new Error(`Invalid question: ${JSON.stringify(state.question)}`);
     }
-    const documents = await retriever.invoke(state.question);
+    const documents = await global.vectorStore.similaritySearch(state.question);
     console.log(`Retrieved ${documents.length} documents`);
     if (!Array.isArray(documents)) {
       throw new Error(
@@ -570,18 +615,142 @@ const app = workflow.compile();
 // Export a function to run the RAG pipeline
 const { Ollama } = require("@langchain/community/llms/ollama");
 
-// Update these functions to accept the model parameter
-async function checkOllamaServer(model) {
+// Add this function to create embeddings
+async function createEmbeddings() {
+  return new OllamaEmbeddings({
+    model: "mxbai-embed-large:latest",
+    baseUrl: "http://localhost:11434",
+  });
+}
+
+// Update the createVectorStore function
+async function createVectorStore(folderPath) {
+  const loaders = {
+    ".txt": (path) => new TextLoader(path),
+    ".json": (path) => new JSONLoader(path),
+    ".csv": (path) => new CSVLoader(path),
+  };
+
+  if (PDFLoader) {
+    loaders[".pdf"] = (path) => new PDFLoader(path);
+  }
+
+  const loader = new DirectoryLoader(folderPath, loaders, {
+    ignoreFiles: (file) => {
+      const ignoredExtensions = [".DS_Store", ".yaml", ".pkl", ".npy", ".bin"];
+      return ignoredExtensions.some((ext) => file.endsWith(ext));
+    },
+  });
+
   try {
-    const result = await testOllama(model);
-    console.log("Ollama server is running.");
-    return result;
+    const docs = await loader.load();
+    console.log(`Loaded ${docs.length} documents`);
+    const embeddings = await createEmbeddings();
+    const vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
+    return vectorStore;
   } catch (error) {
-    console.error("Error connecting to Ollama server:", error.message);
-    return false;
+    console.error("Error in createVectorStore:", error);
+    throw error;
   }
 }
 
+// Update the loadOrCreateVectorStore function
+async function loadOrCreateVectorStore(folderPath, progressCallback) {
+  let vectorStore;
+
+  try {
+    console.log("Creating new vector store...");
+    progressCallback({
+      status: "start",
+      message: "Creating new vector store...",
+    });
+    vectorStore = await createVectorStore(folderPath);
+    progressCallback({
+      status: "complete",
+      message: "Vector store created successfully",
+    });
+  } catch (createError) {
+    console.error("Error creating vector store:", createError);
+    progressCallback({
+      status: "error",
+      message: `Failed to create vector store: ${createError.message}`,
+    });
+    throw new Error(`Failed to create vector store: ${createError.message}`);
+  }
+
+  try {
+    progressCallback({
+      status: "updating",
+      message: "Checking for new files...",
+    });
+    await updateVectorStore(folderPath, vectorStore);
+    progressCallback({
+      status: "complete",
+      message: "Vector store updated successfully",
+    });
+  } catch (updateError) {
+    console.error("Error updating vector store:", updateError);
+    progressCallback({
+      status: "error",
+      message: `Error updating vector store: ${updateError.message}`,
+    });
+    // Continue with the existing vector store even if update fails
+  }
+
+  // Store the vectorStore in a global variable or some persistent storage
+  global.vectorStore = vectorStore;
+
+  // Return a simple success message instead of the vectorStore object
+  return {
+    success: true,
+    message: "Vector store loaded or created successfully",
+  };
+}
+
+// Update the updateVectorStore function
+async function updateVectorStore(folderPath, vectorStore) {
+  const loaders = {
+    ".txt": (path) => new TextLoader(path),
+    ".json": (path) => new JSONLoader(path),
+    ".csv": (path) => new CSVLoader(path),
+  };
+
+  if (PDFLoader) {
+    loaders[".pdf"] = (path) => new PDFLoader(path);
+  }
+
+  const loader = new DirectoryLoader(folderPath, loaders, {
+    ignoreFiles: (file) => {
+      const ignoredExtensions = [".DS_Store", ".yaml", ".pkl", ".npy", ".bin"];
+      return ignoredExtensions.some((ext) => file.endsWith(ext));
+    },
+  });
+
+  try {
+    const docs = await loader.load();
+    const existingDocs = await vectorStore.similaritySearch("", docs.length);
+    const newDocs = docs.filter(
+      (doc) =>
+        !existingDocs.some(
+          (existingDoc) => existingDoc.metadata.source === doc.metadata.source
+        )
+    );
+
+    if (newDocs.length > 0) {
+      console.log(
+        `Adding ${newDocs.length} new documents to the vector store...`
+      );
+      const embeddings = await createEmbeddings();
+      await vectorStore.addDocuments(newDocs, embeddings);
+      await vectorStore.save(path.join(folderPath, ".vector_store"));
+    }
+  } catch (error) {
+    console.error("Error in updateVectorStore:", error);
+    throw error;
+  }
+}
+
+// Update the runRAG function to use the new vector store
 async function runRAG(
   question,
   model,
@@ -661,6 +830,11 @@ async function runRAG(
       sendStepUpdate("retrieve");
       sendLogUpdate("retrieve", "Retrieving relevant documents...");
       try {
+        const folderPath = await ipcRenderer.invoke("get-selected-folder");
+        if (!folderPath) {
+          throw new Error("No folder selected. Please select a folder first.");
+        }
+        retriever = await loadOrCreateVectorStore(folderPath);
         const { documents } = await retrieve({ question });
         if (!documents || documents.length === 0) {
           throw new Error("No valid documents retrieved");
@@ -789,4 +963,5 @@ module.exports = {
   testOllama,
   listOllamaModels,
   setSearchUrls,
+  loadOrCreateVectorStore,
 };
