@@ -1,3 +1,6 @@
+// At the top of the file, add:
+let sendLogUpdate;
+
 const { StateGraph, END, START } = require("@langchain/langgraph");
 const { ChatOllama } = require("@langchain/community/chat_models/ollama");
 const { OllamaEmbeddings } = require("@langchain/community/embeddings/ollama");
@@ -71,27 +74,45 @@ async function callOllama(model, prompt, isJson = false) {
 async function jsonModeLlm(input) {
   const promptString =
     typeof input === "string" ? input : JSON.stringify(input);
-  const result = await callOllama(
-    "llama3.2:3b-instruct-fp16",
-    promptString,
-    true
-  );
-  if (result.error) {
-    console.error("Error in jsonModeLlm:", result.error);
-    console.error("Raw response:", result.rawResponse);
-    // Attempt to extract a valid response from the raw text
-    const match = result.rawResponse.match(/\{.*\}/s);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch (e) {
-        console.error("Failed to extract JSON from raw response");
+  try {
+    const result = await callOllama(
+      "llama3.2:3b-instruct-fp16",
+      promptString,
+      true
+    );
+    console.log("Raw jsonModeLlm result:", result);
+
+    if (typeof result === "object" && result !== null) {
+      return result;
+    }
+
+    if (typeof result === "string") {
+      // Try to extract JSON from the string response
+      const jsonMatch = result.match(
+        /\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/g
+      );
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch (e) {
+          console.error("Failed to parse extracted JSON:", e);
+        }
+      }
+
+      // If JSON extraction fails, try to infer the response
+      if (result.toLowerCase().includes("yes")) {
+        return { score: "yes" };
+      } else if (result.toLowerCase().includes("no")) {
+        return { score: "no" };
       }
     }
-    // If extraction fails, return a default response
-    return { datasource: "vectorstore" };
+
+    console.error("Unexpected jsonModeLlm result:", result);
+    return { error: "Invalid response", rawResponse: result };
+  } catch (error) {
+    console.error("Error in jsonModeLlm:", error);
+    return { error: error.message, rawResponse: error.toString() };
   }
-  return result;
 }
 
 async function llm(input) {
@@ -291,11 +312,20 @@ const retrieve = async (state) => {
         `Invalid documents returned: ${JSON.stringify(documents)}`
       );
     }
-    // Filter out invalid documents
+    // Filter out invalid documents and log full text
     const validDocuments = documents.filter(
       (doc) => doc && typeof doc.pageContent === "string"
     );
     console.log(`${validDocuments.length} valid documents after filtering`);
+    validDocuments.forEach((doc, index) => {
+      console.log(`Document ${index + 1} full text:`, doc.pageContent);
+      if (sendLogUpdate) {
+        sendLogUpdate(
+          "retrieve",
+          `Document ${index + 1} full text: ${doc.pageContent}`
+        );
+      }
+    });
     return { documents: validDocuments };
   } catch (error) {
     console.error("Error in retrieve function:", error);
@@ -319,9 +349,10 @@ const gradeDocuments = async (state) => {
     console.error("Invalid documents:", state.documents);
     return { documents: [] };
   }
-  for (const doc of state.documents) {
+  for (let i = 0; i < state.documents.length; i++) {
+    const doc = state.documents[i];
     try {
-      console.log("Grading document:", doc);
+      console.log(`Grading document ${i + 1}/${state.documents.length}`);
       if (!doc || typeof doc !== "object") {
         console.error("Invalid document object:", doc);
         continue;
@@ -330,48 +361,106 @@ const gradeDocuments = async (state) => {
         console.error("Invalid pageContent:", doc.pageContent);
         continue;
       }
-      const content = doc.pageContent.trim();
-      console.log("Trimmed content:", content.substring(0, 100) + "...");
+      const content = doc.pageContent;
+      console.log(`\nDocument ${i + 1} content:`, content);
+      sendLogUpdate(
+        "grade",
+        `\n--- Document ${i + 1} ---\nContent: ${content}`
+      );
+
+      // Construct the full prompt for grading
+      const fullPrompt = `You are a grader assessing relevance of a retrieved document to a user question.
+Here is the retrieved document:
+
+<document>
+${content}
+</document>
+
+Here is the user question:
+<question>
+${state.question}
+</question>
+
+If the document contains keywords related to the user question, grade it as relevant.
+It does not need to be a stringent test. The goal is to filter out erroneous retrievals.
+Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question.
+Provide the binary score as a JSON with a single key 'score' and no preamble or explanation.`;
+
+      console.log(`\nFull grading prompt for document ${i + 1}:`, fullPrompt);
+      sendLogUpdate("grade", `\nFull grading prompt:\n${fullPrompt}`);
+
       const gradeResponse = await retrievalGrader.invoke({
         question: state.question,
         content: content,
       });
-      console.log("Raw grade response:", gradeResponse);
+      console.log(`\nRaw grade response for document ${i + 1}:`, gradeResponse);
+      sendLogUpdate(
+        "grade",
+        `\nRaw grade response:\n${JSON.stringify(gradeResponse, null, 2)}`
+      );
 
       let grade;
-      if (typeof gradeResponse === "string") {
+      if (typeof gradeResponse === "object" && gradeResponse !== null) {
+        grade = gradeResponse;
+      } else if (typeof gradeResponse === "string") {
         // Try to extract JSON from the string response
         const match = gradeResponse.match(/\{.*\}/s);
         if (match) {
           try {
             grade = JSON.parse(match[0]);
           } catch (e) {
-            console.error("Failed to parse JSON from response:", e);
-            grade = { score: "no" }; // Default to 'no' if parsing fails
+            console.error("Failed to parse extracted JSON:", e);
+            grade = {
+              score: gradeResponse.toLowerCase().includes("yes") ? "yes" : "no",
+            };
           }
         } else {
-          console.error("No JSON object found in response");
-          // Check for 'yes' or 'no' in the response
           grade = {
             score: gradeResponse.toLowerCase().includes("yes") ? "yes" : "no",
           };
         }
-      } else if (typeof gradeResponse === "object" && gradeResponse !== null) {
-        grade = gradeResponse;
       } else {
         console.error("Unexpected grade response type:", typeof gradeResponse);
-        grade = { score: "no" }; // Default to 'no' for unexpected response types
+        grade = { score: "no" };
       }
 
-      console.log("Document grade:", grade);
+      console.log(`Document ${i + 1} grade:`, grade);
+      sendLogUpdate(
+        "grade",
+        `\nFinal grade: ${JSON.stringify(grade, null, 2)}`
+      );
       if (grade.score === "yes") {
-        console.log("---GRADE: DOCUMENT RELEVANT---");
+        console.log(`---GRADE: DOCUMENT ${i + 1} RELEVANT---`);
+        sendLogUpdate("grade", `\nResult: DOCUMENT RELEVANT`);
         relevantDocs.push(doc);
       } else {
-        console.log("---GRADE: DOCUMENT NOT RELEVANT---");
+        console.log(`---GRADE: DOCUMENT ${i + 1} NOT RELEVANT---`);
+        sendLogUpdate("grade", `\nResult: DOCUMENT NOT RELEVANT`);
       }
+
+      // Log the full grading information
+      const gradingLog = {
+        documentIndex: i + 1,
+        question: state.question,
+        documentContent: content,
+        fullPrompt: fullPrompt,
+        gradeResponse: gradeResponse,
+        finalGrade: grade,
+      };
+      console.log(
+        `Full grading information for document ${i + 1}:`,
+        gradingLog
+      );
+      sendLogUpdate(
+        "grade",
+        `\nFull grading information:\n${JSON.stringify(gradingLog, null, 2)}`
+      );
     } catch (error) {
-      console.error("Error grading document:", error);
+      console.error(`Error grading document ${i + 1}:`, error);
+      sendLogUpdate(
+        "grade",
+        `\nError grading document ${i + 1}: ${error.message}`
+      );
       console.error("Problematic document:", JSON.stringify(doc, null, 2));
     }
   }
@@ -501,9 +590,10 @@ async function runRAG(
   question,
   model,
   sendStepUpdate,
-  sendLogUpdate,
+  logUpdateFunction,
   tavilyApiKey
 ) {
+  sendLogUpdate = logUpdateFunction;
   let relevantDocs = [];
   try {
     console.log("Starting RAG pipeline");
@@ -691,8 +781,9 @@ async function listOllamaModels() {
 }
 
 // Add this function to set the search URLs
-function setSearchUrls(urls) {
+function setSearchUrls(urls, logUpdateFunction) {
   searchUrls = urls;
+  sendLogUpdate = logUpdateFunction;
 }
 
 // Update the module.exports

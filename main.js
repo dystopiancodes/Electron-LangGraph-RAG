@@ -80,7 +80,7 @@ ipcMain.handle("invoke-rag", async (event, { question, model }) => {
     const { runRAG, setSearchUrls } = require("./src/rag");
     const tavilyApiKey = store.get("tavilyApiKey");
     const searchUrls = store.get("searchUrls", []);
-    setSearchUrls(searchUrls);
+    setSearchUrls(searchUrls, sendLogUpdate);
     sendStepUpdate("route");
     console.log(
       "Starting RAG process with question:",
