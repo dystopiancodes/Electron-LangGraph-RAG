@@ -1,0 +1,26 @@
+{
+  "name": "electron-langgraph-rag",
+  "version": "1.0.0",
+  "description": "Electron app with LangGraph adaptive RAG",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "@langchain/community": "^0.0.26",
+    "@langchain/core": "^0.1.26",
+    "@langchain/langgraph": "^0.0.7",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.3.1",
+    "electron-store": "^8.1.0",
+    "langchain": "^0.1.9",
+    "node-fetch": "^2.6.1",
+    "web-streams-polyfill": "^3.2.1",
+    "xmlhttprequest": "^1.8.0"
+  },
+  "devDependencies": {
+    "electron": "^22.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

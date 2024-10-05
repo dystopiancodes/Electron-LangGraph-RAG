@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Electron LangGraph RAG</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      href="https://fonts.googleapis.com/icon?family=Material+Icons"
+      rel="stylesheet"
+    />
+    <style>
+      .step {
+        transition: all 0.3s ease;
+      }
+      .step.active {
+        background-color: #4caf50;
+        color: white;
+      }
+      .step.queued {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .step.completed {
+        opacity: 0.8;
+        cursor: pointer;
+      }
+      .step.selected {
+        border: 2px solid #2196f3;
+        background-color: #e3f2fd;
+      }
+      .disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
+      <h1 class="text-2xl font-bold mb-4">Electron LangGraph RAG</h1>
+
+      <div class="flex items-center mb-4">
+        <div
+          id="ollama-status"
+          class="w-4 h-4 rounded-full bg-gray-400 mr-2"
+        ></div>
+        <select id="model-select" class="border rounded p-2 mr-2">
+          <option value="">Select a model</option>
+        </select>
+        <button
+          onclick="loadModels()"
+          class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+        >
+          Load Models
+        </button>
+        <button
+          onclick="testOllama()"
+          class="ml-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+        >
+          Test Ollama
+        </button>
+      </div>
+
+      <!-- Replace the Tavily API Key input with this -->
+      <div class="flex items-center mt-2">
+        <button
+          onclick="toggleTavilyApiKeyInput()"
+          class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 mr-2"
+        >
+          <span class="material-icons">vpn_key</span>
+        </button>
+        <div id="tavily-api-key-container" class="hidden flex-grow">
+          <input
+            type="text"
+            id="tavily-api-key"
+            placeholder="Enter Tavily API Key"
+            class="border rounded p-2 mr-2 w-full"
+          />
+          <button
+            onclick="saveTavilyApiKey()"
+            class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
+          >
+            Save API Key
+          </button>
+        </div>
+      </div>
+
+      <!-- Add this just below the Tavily API Key input -->
+      <div class="flex items-center mt-2">
+        <textarea
+          id="search-urls"
+          placeholder="Enter URLs to search (one per line)"
+          class="border rounded p-2 mr-2 flex-grow h-24"
+        ></textarea>
+        <button
+          onclick="saveSearchUrls()"
+          class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600"
+        >
+          Save URLs
+        </button>
+      </div>
+
+      <div class="flex mb-4 relative">
+        <input
+          type="text"
+          id="question"
+          placeholder="Enter your question"
+          class="flex-grow border rounded p-2 mr-2"
+        />
+        <button
+          onclick="askQuestion()"
+          id="askButton"
+          class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 flex items-center"
+        >
+          <span class="material-icons mr-2">send</span>
+          Ask
+        </button>
+        <div
+          id="processingCursor"
+          class="hidden absolute right-0 top-0 bottom-0 flex items-center pr-2"
+        >
+          <span class="material-icons animate-spin">refresh</span>
+        </div>
+      </div>
+
+      <div id="steps" class="flex justify-between mb-4">
+        <div
+          class="step queued flex flex-col items-center p-2 rounded"
+          onclick="showStepLog('route')"
+          data-step="route"
+        >
+          <span class="material-icons">route</span>
+          <span>Route</span>
+        </div>
+        <div
+          class="step queued flex flex-col items-center p-2 rounded"
+          onclick="showStepLog('retrieve')"
+          data-step="retrieve"
+        >
+          <span class="material-icons">search</span>
+          <span>Retrieve</span>
+        </div>
+        <div
+          class="step queued flex flex-col items-center p-2 rounded"
+          onclick="showStepLog('grade')"
+          data-step="grade"
+        >
+          <span class="material-icons">grade</span>
+          <span>Grade</span>
+        </div>
+        <div
+          class="step queued flex flex-col items-center p-2 rounded"
+          onclick="showStepLog('transform')"
+          data-step="transform"
+        >
+          <span class="material-icons">edit</span>
+          <span>Transform</span>
+        </div>
+        <div
+          class="step queued flex flex-col items-center p-2 rounded"
+          onclick="showStepLog('generate')"
+          data-step="generate"
+        >
+          <span class="material-icons">psychology</span>
+          <span>Generate</span>
+        </div>
+      </div>
+
+      <div
+        id="stepLog"
+        class="mt-4 p-4 bg-gray-100 rounded hidden overflow-auto max-h-96"
+      ></div>
+      <div id="result" class="mt-4 p-4 bg-gray-100 rounded"></div>
+    </div>
+
+    <script>
+      const { ipcRenderer } = require("electron");
+      let lastTestedModel = "";
+      let isConnected = false;
+      let stepLogs = {
+        route: [],
+        retrieve: [],
+        grade: [],
+        transform: [],
+        generate: [],
+      };
+
+      async function loadModels() {
+        try {
+          const models = await ipcRenderer.invoke("list-ollama-models");
+          const select = document.getElementById("model-select");
+          select.innerHTML = '<option value="">Select a model</option>';
+          models.forEach((model) => {
+            const option = document.createElement("option");
+            option.value = model;
+            option.textContent = model;
+            select.appendChild(option);
+          });
+          console.log("Models loaded:", models);
+
+          // Load the previously selected model
+          const savedModel = await ipcRenderer.invoke("get-selected-model");
+          if (savedModel) {
+            select.value = savedModel;
+            await testOllama(true);
+          }
+        } catch (error) {
+          console.error("Error loading models:", error);
+          alert("Failed to load models. Check the console for details.");
+        }
+      }
+
+      async function askQuestion() {
+        const questionInput = document.getElementById("question");
+        const question = questionInput.value;
+        const model = document.getElementById("model-select").value;
+        if (!model) {
+          alert("Please select a model first");
+          return;
+        }
+        if (!isConnected || model !== lastTestedModel) {
+          await testOllama(true);
+        }
+        if (!isConnected) {
+          alert(
+            "Failed to connect to Ollama. Please check the server and try again."
+          );
+          return;
+        }
+
+        const tavilyApiKey = await ipcRenderer.invoke("get-tavily-api-key");
+        if (!tavilyApiKey) {
+          alert("Please set your Tavily API Key first");
+          return;
+        }
+
+        disableInterface(true);
+        resetSteps();
+        clearStepLogs();
+
+        try {
+          const result = await ipcRenderer.invoke("invoke-rag", {
+            question,
+            model,
+          });
+          if (result.error) {
+            document.getElementById(
+              "result"
+            ).innerText = `Error: ${result.error}`;
+          } else {
+            document.getElementById("result").innerText =
+              result.generation || "No answer generated";
+          }
+        } catch (error) {
+          console.error("Error asking question:", error);
+          document.getElementById(
+            "result"
+          ).innerText = `Error: ${error.message}`;
+        } finally {
+          disableInterface(false);
+        }
+      }
+
+      async function testOllama(silent = false) {
+        const model = document.getElementById("model-select").value;
+        if (!model) {
+          alert("Please select a model first");
+          return;
+        }
+        const result = await ipcRenderer.invoke("test-ollama", model);
+        isConnected = result;
+        lastTestedModel = model;
+        updateStatus();
+        if (!silent) {
+          alert(
+            result
+              ? "Ollama test successful!"
+              : "Ollama test failed. Check console for details."
+          );
+        }
+      }
+
+      async function saveTavilyApiKey() {
+        const apiKey = document.getElementById("tavily-api-key").value;
+        if (apiKey) {
+          await ipcRenderer.invoke("save-tavily-api-key", apiKey);
+          alert("Tavily API Key saved successfully!");
+        } else {
+          alert("Please enter a valid API key");
+        }
+      }
+
+      async function saveSearchUrls() {
+        const urlsText = document.getElementById("search-urls").value;
+        const urls = urlsText.split("\n").filter((url) => url.trim() !== "");
+        if (urls.length > 0) {
+          await ipcRenderer.invoke("save-search-urls", urls);
+          alert("Search URLs saved successfully!");
+        } else {
+          alert("Please enter at least one valid URL");
+        }
+      }
+
+      function updateStatus() {
+        const statusElement = document.getElementById("ollama-status");
+        statusElement.className = isConnected
+          ? "w-4 h-4 rounded-full bg-green-500"
+          : "w-4 h-4 rounded-full bg-red-500";
+      }
+
+      function disableInterface(disable) {
+        const elements = ["askButton", "question", "model-select"];
+        elements.forEach((id) => {
+          const element = document.getElementById(id);
+          element.disabled = disable;
+          element.classList.toggle("disabled", disable);
+        });
+        document
+          .getElementById("processingCursor")
+          .classList.toggle("hidden", !disable);
+      }
+
+      function resetSteps() {
+        const steps = document.querySelectorAll(".step");
+        steps.forEach((step) => {
+          step.classList.remove("active", "completed", "selected");
+          step.classList.add("queued");
+          step.style.pointerEvents = "none";
+        });
+      }
+
+      function activateStep(stepName) {
+        const steps = document.querySelectorAll(".step");
+        let foundCurrentStep = false;
+        steps.forEach((step) => {
+          const currentStepName = step.getAttribute("data-step");
+          if (currentStepName === stepName) {
+            step.classList.remove("queued", "completed");
+            step.classList.add("active");
+            step.style.pointerEvents = "auto";
+            foundCurrentStep = true;
+          } else if (!foundCurrentStep) {
+            step.classList.remove("queued", "active");
+            step.classList.add("completed");
+            step.style.pointerEvents = "auto";
+          } else {
+            step.classList.remove("active", "completed");
+            step.classList.add("queued");
+            step.style.pointerEvents = "none";
+          }
+        });
+      }
+
+      function clearStepLogs() {
+        for (let key in stepLogs) {
+          stepLogs[key] = [];
+        }
+      }
+
+      function showStepLog(step) {
+        const stepElement = document.querySelector(`[data-step="${step}"]`);
+        if (stepElement.classList.contains("queued")) {
+          return; // Don't show logs for queued steps
+        }
+
+        // Remove 'selected' class from all steps
+        document
+          .querySelectorAll(".step")
+          .forEach((el) => el.classList.remove("selected"));
+        // Add 'selected' class to the clicked step
+        stepElement.classList.add("selected");
+
+        const logElement = document.getElementById("stepLog");
+        logElement.innerHTML = `<h3 class="font-bold mb-2">${
+          step.charAt(0).toUpperCase() + step.slice(1)
+        } Log:</h3>`;
+        if (stepLogs[step].length > 0) {
+          const logList = document.createElement("ul");
+          logList.className = "space-y-2";
+          stepLogs[step].forEach((log) => {
+            const logItem = document.createElement("li");
+            logItem.className = "border-b pb-2";
+            if (typeof log === "object") {
+              logItem.innerHTML = `<pre class="whitespace-pre-wrap">${JSON.stringify(
+                log,
+                null,
+                2
+              )}</pre>`;
+            } else {
+              logItem.textContent = log;
+            }
+            logList.appendChild(logItem);
+          });
+          logElement.appendChild(logList);
+        } else {
+          logElement.innerHTML += "<p>No logs available for this step.</p>";
+        }
+        logElement.classList.remove("hidden");
+      }
+
+      async function saveSelectedModel(model) {
+        await ipcRenderer.invoke("save-selected-model", model);
+      }
+
+      async function loadSavedUrls() {
+        const savedUrls = await ipcRenderer.invoke("get-search-urls");
+        document.getElementById("search-urls").value = savedUrls.join("\n");
+      }
+
+      function toggleTavilyApiKeyInput() {
+        const container = document.getElementById("tavily-api-key-container");
+        container.classList.toggle("hidden");
+      }
+
+      // Load models and saved URLs when the page loads
+      loadModels();
+      loadSavedUrls();
+
+      // Update the model-select event listener
+      document
+        .getElementById("model-select")
+        .addEventListener("change", async (event) => {
+          const selectedModel = event.target.value;
+          if (selectedModel) {
+            await saveSelectedModel(selectedModel);
+            if (selectedModel !== lastTestedModel) {
+              await testOllama(true);
+            }
+          }
+        });
+
+      // Add event listener for Enter key on question input
+      document
+        .getElementById("question")
+        .addEventListener("keypress", function (event) {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            askQuestion();
+          }
+        });
+
+      // Listen for step updates from the main process
+      ipcRenderer.on("update-step", (event, step) => {
+        activateStep(step);
+      });
+
+      // Listen for log updates from the main process
+      ipcRenderer.on("update-log", (event, { step, log }) => {
+        stepLogs[step].push(log);
+        if (document.getElementById("stepLog").innerHTML.includes(step)) {
+          showStepLog(step);
+        }
+      });
+    </script>
+  </body>
+</html>
