@@ -237,9 +237,13 @@
           return;
         }
 
-        disableInterface(true);
+        // Clear all logs and reset state
+        clearAllLogs();
         resetSteps();
         clearStepLogs();
+        document.getElementById("result").innerText = "";
+
+        disableInterface(true);
 
         try {
           const result = await ipcRenderer.invoke("invoke-rag", {
@@ -413,6 +417,27 @@
       function toggleTavilyApiKeyInput() {
         const container = document.getElementById("tavily-api-key-container");
         container.classList.toggle("hidden");
+      }
+
+      function clearAllLogs() {
+        stepLogs = {
+          route: [],
+          retrieve: [],
+          grade: [],
+          transform: [],
+          generate: [],
+        };
+        const logElement = document.getElementById("stepLog");
+        logElement.innerHTML = "";
+        logElement.classList.add("hidden");
+
+        const steps = document.querySelectorAll(".step");
+        steps.forEach((step) => {
+          step.classList.remove("selected", "active", "completed");
+          step.classList.add("queued");
+        });
+
+        document.getElementById("result").innerText = "";
       }
 
       // Load models and saved URLs when the page loads

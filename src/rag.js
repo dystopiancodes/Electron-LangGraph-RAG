@@ -260,7 +260,7 @@ const questionRouter = questionRouterPrompt
   .pipe(new JsonOutputParser());
 const retrievalGrader = graderPrompt
   .pipe(jsonModeLlm)
-  .pipe(new JsonOutputParser());
+  .pipe(new JsonOutputParser({ strict: false }));
 const rewriter = rewriterPrompt.pipe(llm).pipe(new StringOutputParser());
 
 // Update the webSearchTool initialization
@@ -321,15 +321,48 @@ const gradeDocuments = async (state) => {
   }
   for (const doc of state.documents) {
     try {
-      if (!doc || typeof doc.pageContent !== "string") {
-        console.error("Invalid document:", doc);
+      console.log("Grading document:", doc);
+      if (!doc || typeof doc !== "object") {
+        console.error("Invalid document object:", doc);
+        continue;
+      }
+      if (typeof doc.pageContent !== "string") {
+        console.error("Invalid pageContent:", doc.pageContent);
         continue;
       }
       const content = doc.pageContent.trim();
-      const grade = await retrievalGrader.invoke({
+      console.log("Trimmed content:", content.substring(0, 100) + "...");
+      const gradeResponse = await retrievalGrader.invoke({
         question: state.question,
         content: content,
       });
+      console.log("Raw grade response:", gradeResponse);
+
+      let grade;
+      if (typeof gradeResponse === "string") {
+        // Try to extract JSON from the string response
+        const match = gradeResponse.match(/\{.*\}/s);
+        if (match) {
+          try {
+            grade = JSON.parse(match[0]);
+          } catch (e) {
+            console.error("Failed to parse JSON from response:", e);
+            grade = { score: "no" }; // Default to 'no' if parsing fails
+          }
+        } else {
+          console.error("No JSON object found in response");
+          // Check for 'yes' or 'no' in the response
+          grade = {
+            score: gradeResponse.toLowerCase().includes("yes") ? "yes" : "no",
+          };
+        }
+      } else if (typeof gradeResponse === "object" && gradeResponse !== null) {
+        grade = gradeResponse;
+      } else {
+        console.error("Unexpected grade response type:", typeof gradeResponse);
+        grade = { score: "no" }; // Default to 'no' for unexpected response types
+      }
+
       console.log("Document grade:", grade);
       if (grade.score === "yes") {
         console.log("---GRADE: DOCUMENT RELEVANT---");
@@ -339,7 +372,7 @@ const gradeDocuments = async (state) => {
       }
     } catch (error) {
       console.error("Error grading document:", error);
-      console.error("Problematic document:", doc);
+      console.error("Problematic document:", JSON.stringify(doc, null, 2));
     }
   }
   return { documents: relevantDocs };
@@ -471,10 +504,11 @@ async function runRAG(
   sendLogUpdate,
   tavilyApiKey
 ) {
-  let relevantDocs = []; // Define relevantDocs here
+  let relevantDocs = [];
   try {
     console.log("Starting RAG pipeline");
     sendLogUpdate("start", "Starting RAG pipeline");
+    sendLogUpdate("start", JSON.stringify({ question, model }, null, 2));
 
     if (!question || typeof question !== "string") {
       throw new Error(`Invalid question: ${JSON.stringify(question)}`);
@@ -501,7 +535,10 @@ async function runRAG(
       `${QUESTION_ROUTER_SYSTEM_TEMPLATE}\n\nHuman: ${question}`
     );
     console.log("Route response:", routeResponse);
-    sendLogUpdate("route", `Router decision: ${JSON.stringify(routeResponse)}`);
+    sendLogUpdate(
+      "route",
+      `Router decision: ${JSON.stringify(routeResponse, null, 2)}`
+    );
 
     const routeDecision = routeResponse.datasource;
     console.log("Route decision:", routeDecision);
@@ -525,10 +562,7 @@ async function runRAG(
       try {
         const searchResults = await webSearch({ question });
         console.log("Web search results:", searchResults);
-        sendLogUpdate(
-          "web_search",
-          `Search results: ${JSON.stringify(searchResults, null, 2)}`
-        );
+        sendLogUpdate("web_search", JSON.stringify(searchResults, null, 2));
         // Update relevantDocs with the search results
         relevantDocs = searchResults.documents;
       } catch (error) {
@@ -546,7 +580,7 @@ async function runRAG(
           throw new Error("No valid documents retrieved");
         }
         console.log("Retrieved documents:", documents);
-        sendLogUpdate("retrieve", `Retrieved ${documents.length} documents`);
+        sendLogUpdate("retrieve", JSON.stringify(documents, null, 2));
         documents.forEach((doc, index) => {
           if (doc && doc.pageContent && typeof doc.pageContent === "string") {
             sendLogUpdate(
@@ -563,26 +597,25 @@ async function runRAG(
         sendStepUpdate("grade");
         sendLogUpdate("grade", "Grading retrieved documents...");
         try {
+          console.log("Documents before grading:", documents);
           const gradedDocs = await gradeDocuments({
             question,
             documents,
           });
+          console.log("Graded documents:", gradedDocs);
           relevantDocs = gradedDocs.documents; // Update relevantDocs here
           console.log("Relevant documents:", relevantDocs);
-          sendLogUpdate(
-            "grade",
-            `${relevantDocs.length} relevant documents found`
-          );
+          sendLogUpdate("grade", JSON.stringify(gradedDocs, null, 2));
 
           if (relevantDocs.length === 0) {
-            console.log("Transforming query");
+            console.log("No relevant documents found, transforming query");
             sendStepUpdate("transform");
             sendLogUpdate("transform", "Transforming query...");
             const betterQuestion = await rewriter.invoke({ question });
             console.log("Transformed question:", betterQuestion);
             sendLogUpdate(
               "transform",
-              `Transformed question: "${betterQuestion}"`
+              JSON.stringify({ betterQuestion }, null, 2)
             );
             // Here you might want to restart the retrieval process with the better question
           }
@@ -607,12 +640,12 @@ async function runRAG(
         .join("\n\n")}\n\nQuestion: ${question}\n\nAnswer:`
     );
     console.log("Generated answer:", generatedAnswer);
-    sendLogUpdate("generate", "Answer generated successfully");
-    sendLogUpdate("generate", `Generated answer: ${generatedAnswer}`);
+    sendLogUpdate("generate", JSON.stringify({ generatedAnswer }, null, 2));
     return { generation: generatedAnswer };
   } catch (error) {
     console.error("Error in RAG pipeline:", error);
     sendLogUpdate("error", `Error in RAG pipeline: ${error.message}`);
+    sendLogUpdate("error", JSON.stringify({ error: error.message }, null, 2));
     return { error: error.message || "An unknown error occurred" };
   }
 }
