@@ -76,7 +76,7 @@ function sendLogUpdate(step, log) {
 // Update the invoke-rag handler
 ipcMain.handle(
   "invoke-rag",
-  async (event, { question, model, isTavilySearchEnabled }) => {
+  async (event, { question, model, embeddingModel, isTavilySearchEnabled }) => {
     try {
       const { runRAG, setSearchUrls } = require("./src/rag");
       const tavilyApiKey = store.get("tavilyApiKey");
@@ -87,14 +87,17 @@ ipcMain.handle(
       console.log(
         "Starting RAG process with question:",
         question,
-        "model:",
+        "LLM model:",
         model,
+        "Embedding model:",
+        embeddingModel,
         "Tavily search enabled:",
         isTavilySearchEnabled
       );
       const result = await runRAG(
         question,
         model,
+        embeddingModel,
         sendStepUpdate,
         sendLogUpdate,
         tavilyApiKey,
@@ -197,4 +200,18 @@ ipcMain.handle("set-tavily-search-enabled", (event, isEnabled) => {
 // Add this handler near the other IPC handlers
 ipcMain.handle("get-tavily-search-enabled", () => {
   return store.get("tavilySearchEnabled", false);
+});
+
+// Add these new IPC handlers
+ipcMain.handle("list-embedding-models", async () => {
+  const { listEmbeddingModels } = require("./src/rag");
+  return await listEmbeddingModels();
+});
+
+ipcMain.handle("save-selected-embedding-model", async (event, model) => {
+  store.set("selectedEmbeddingModel", model);
+});
+
+ipcMain.handle("get-selected-embedding-model", async () => {
+  return store.get("selectedEmbeddingModel", "");
 });

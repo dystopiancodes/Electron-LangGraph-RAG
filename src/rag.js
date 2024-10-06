@@ -619,10 +619,29 @@ const app = workflow.compile();
 // Export a function to run the RAG pipeline
 const { Ollama } = require("@langchain/community/llms/ollama");
 
-// Add this function to create embeddings
+// Add this function to list embedding models
+async function listEmbeddingModels() {
+  try {
+    const response = await fetch("http://localhost:11434/api/tags");
+    const data = await response.json();
+    console.log("Available Ollama models:", data.models);
+    // Filter models that are suitable for embeddings (you may need to adjust this filter)
+    const embeddingModels = data.models
+      .filter((model) => model.name.toLowerCase().includes("embed"))
+      .map((model) => model.name);
+    return embeddingModels;
+  } catch (error) {
+    console.error("Error listing Ollama embedding models:", error.message);
+    return [];
+  }
+}
+
+// Update the createEmbeddings function to use the selected model
 async function createEmbeddings() {
+  const selectedEmbeddingModel =
+    global.selectedEmbeddingModel || "mxbai-embed-large:latest";
   return new OllamaEmbeddings({
-    model: "mxbai-embed-large:latest",
+    model: selectedEmbeddingModel,
     baseUrl: "http://localhost:11434",
   });
 }
@@ -906,13 +925,17 @@ async function updateVectorStore(folderPath, vectorStore, progressCallback) {
 // Update the runRAG function to use the new vector store
 async function runRAG(
   question,
-  model,
+  llmModel,
+  embeddingModel,
   sendStepUpdate,
   logUpdateFunction,
   tavilyApiKey,
   isTavilySearchEnabled,
   selectedFolderPath
 ) {
+  // Set the global embedding model
+  global.selectedEmbeddingModel = embeddingModel;
+
   sendLogUpdate = logUpdateFunction;
   let relevantDocs = [];
   try {
@@ -920,14 +943,18 @@ async function runRAG(
     sendLogUpdate("start", "Starting RAG pipeline");
     sendLogUpdate(
       "start",
-      JSON.stringify({ question, model, isTavilySearchEnabled }, null, 2)
+      JSON.stringify(
+        { question, llmModel, embeddingModel, isTavilySearchEnabled },
+        null,
+        2
+      )
     );
 
     if (!question || typeof question !== "string") {
       throw new Error(`Invalid question: ${JSON.stringify(question)}`);
     }
 
-    const serverStatus = await checkOllamaServer(model);
+    const serverStatus = await checkOllamaServer(llmModel);
     console.log("Ollama server status:", serverStatus);
     sendLogUpdate("start", `Ollama server status: ${serverStatus}`);
 
@@ -1162,6 +1189,7 @@ module.exports = {
   checkOllamaServer,
   testOllama,
   listOllamaModels,
+  listEmbeddingModels,
   setSearchUrls,
   loadOrCreateVectorStore,
 };

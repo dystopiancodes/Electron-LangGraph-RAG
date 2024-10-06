@@ -197,6 +197,21 @@
             </select>
           </div>
 
+          <!-- Add this after the LLM model selection in the settings modal -->
+          <div class="mb-4">
+            <label
+              for="embedding-model-select"
+              class="block text-sm font-medium text-gray-700 mb-2"
+              >Select Embedding Model</label
+            >
+            <select
+              id="embedding-model-select"
+              class="w-full border rounded p-2"
+            >
+              <option value="">Select an embedding model</option>
+            </select>
+          </div>
+
           <!-- Load and Test Model buttons -->
           <div class="flex mb-4">
             <button
@@ -706,6 +721,30 @@
 
         // Load models
         await loadModels();
+
+        // Load embedding models
+        const embeddingModels = await ipcRenderer.invoke(
+          "list-embedding-models"
+        );
+        const embeddingSelect = document.getElementById(
+          "embedding-model-select"
+        );
+        embeddingSelect.innerHTML =
+          '<option value="">Select an embedding model</option>';
+        embeddingModels.forEach((model) => {
+          const option = document.createElement("option");
+          option.value = model;
+          option.textContent = model;
+          embeddingSelect.appendChild(option);
+        });
+
+        // Load the previously selected embedding model
+        const savedEmbeddingModel = await ipcRenderer.invoke(
+          "get-selected-embedding-model"
+        );
+        if (savedEmbeddingModel) {
+          embeddingSelect.value = savedEmbeddingModel;
+        }
       }
 
       // Update the openSettingsModal function
@@ -713,6 +752,19 @@
         settingsModal.classList.remove("hidden");
         loadSettings();
       }
+
+      // Add this event listener for the embedding model select
+      document
+        .getElementById("embedding-model-select")
+        .addEventListener("change", async (event) => {
+          const selectedEmbeddingModel = event.target.value;
+          if (selectedEmbeddingModel) {
+            await ipcRenderer.invoke(
+              "save-selected-embedding-model",
+              selectedEmbeddingModel
+            );
+          }
+        });
     </script>
   </body>
 </html>
