@@ -40,6 +40,18 @@
         transform: translateX(100%);
         background-color: #48bb78;
       }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .animate-pulse {
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
     </style>
   </head>
   <body class="bg-gray-100 p-8">
@@ -61,17 +73,28 @@
       </div>
 
       <!-- Folder selection -->
-      <div class="flex items-center mt-2 mb-4">
+      <div class="flex flex-col items-start mt-2 mb-4">
         <button
+          id="folderSelectButton"
           onclick="selectFolder()"
           class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 mr-2"
         >
           Select Folder
         </button>
-        <span id="selected-folder">No folder selected</span>
-        <div id="indexing-progress" class="ml-2 hidden">
-          <span class="material-icons animate-spin">refresh</span>
-          <span>Indexing...</span>
+        <div id="folderLoadingContainer" class="hidden w-full mt-2">
+          <div class="flex items-center mb-1">
+            <span id="loadingSpinner" class="material-icons animate-spin mr-2"
+              >refresh</span
+            >
+            <span id="loadingStatus">Analyzing folder...</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+            <div
+              id="loadingProgress"
+              class="bg-blue-600 h-2.5 rounded-full"
+              style="width: 0%"
+            ></div>
+          </div>
         </div>
       </div>
 
@@ -566,45 +589,75 @@
       });
 
       // Add this function to your script section
+      let isLoadingFolder = false;
+
       async function selectFolder() {
+        if (isLoadingFolder) return; // Prevent selecting a new folder while loading
+
         const folderPath = await ipcRenderer.invoke("select-folder");
         if (folderPath) {
-          document.getElementById("selected-folder").textContent = folderPath;
+          isLoadingFolder = true;
+          const folderName = folderPath.split("/").pop(); // Get the last part of the path
+          const folderSelectButton =
+            document.getElementById("folderSelectButton");
+          folderSelectButton.textContent = folderName;
+          folderSelectButton.classList.add("animate-pulse");
+
           document
-            .getElementById("indexing-progress")
+            .getElementById("folderLoadingContainer")
             .classList.remove("hidden");
+          document.getElementById("loadingProgress").style.width = "0%";
+
           try {
             const result = await ipcRenderer.invoke(
               "load-or-create-vector-store",
               folderPath
             );
-            if (result.success) {
-              alert("Folder indexed successfully!");
-            } else {
+            if (!result.success) {
               throw new Error(result.error);
             }
           } catch (error) {
             alert(`Error indexing folder: ${error.message}`);
           } finally {
+            isLoadingFolder = false;
+            folderSelectButton.classList.remove("animate-pulse");
             document
-              .getElementById("indexing-progress")
+              .getElementById("folderLoadingContainer")
               .classList.add("hidden");
           }
         }
       }
 
-      // Add this event listener
+      // Update the indexing-progress event listener
       ipcRenderer.on("indexing-progress", (event, progress) => {
-        const progressElement = document.getElementById("indexing-progress");
-        progressElement.textContent = progress.message;
+        const loadingStatus = document.getElementById("loadingStatus");
+        const loadingProgress = document.getElementById("loadingProgress");
+
+        loadingStatus.textContent = progress.message;
+
+        if (progress.percentage !== undefined) {
+          loadingProgress.style.width = `${progress.percentage}%`;
+        }
+
+        if (progress.status === "saved") {
+          // Indexing is complete
+          isLoadingFolder = false;
+          document
+            .getElementById("folderSelectButton")
+            .classList.remove("animate-pulse");
+          document
+            .getElementById("folderLoadingContainer")
+            .classList.add("hidden");
+        }
       });
 
-      // Add this to your existing script
+      // Update the loadSavedFolder function
       async function loadSavedFolder() {
         const savedFolder = await ipcRenderer.invoke("get-selected-folder");
         if (savedFolder) {
-          document.getElementById("selected-folder").textContent = savedFolder;
-          await ipcRenderer.invoke("load-or-create-vector-store", savedFolder);
+          const folderName = savedFolder.split("/").pop(); // Get the last part of the path
+          document.getElementById("folderSelectButton").textContent =
+            folderName;
         }
       }
 

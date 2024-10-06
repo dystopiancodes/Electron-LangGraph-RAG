@@ -628,7 +628,7 @@ async function createEmbeddings() {
 }
 
 // Update the createVectorStore function
-async function createVectorStore(folderPath) {
+async function createVectorStore(folderPath, progressCallback) {
   console.log("Creating new vector store...");
   const loaders = {
     ".txt": (path) => new TextLoader(path),
@@ -648,17 +648,71 @@ async function createVectorStore(folderPath) {
   });
 
   try {
+    progressCallback({
+      status: "loading",
+      message: "Loading documents...",
+      percentage: 0,
+    });
+
     const docs = await loader.load();
     console.log(`Loaded ${docs.length} documents`);
+    progressCallback({
+      status: "processing",
+      message: `Processing ${docs.length} documents...`,
+      percentage: 10,
+    });
+
+    progressCallback({
+      status: "embedding",
+      message: "Creating embeddings...",
+      percentage: 20,
+    });
+
     const embeddings = await createEmbeddings();
-    const vectorStore = await FaissStore.fromDocuments(docs, embeddings);
+
+    progressCallback({
+      status: "vectorizing",
+      message: "Creating vector store...",
+      percentage: 40,
+    });
+
+    let processedDocs = 0;
+    const vectorStore = await FaissStore.fromDocuments(docs, embeddings, {
+      onProgress: (progress) => {
+        processedDocs++;
+        const percentage = Math.round((processedDocs / docs.length) * 60) + 40; // 40% to 100%
+        progressCallback({
+          status: "vectorizing",
+          message: `Vectorizing document ${processedDocs} of ${docs.length}...`,
+          percentage: Math.min(percentage, 99), // Cap at 99% to show completion only after saving
+        });
+      },
+    });
+
     console.log("Vector store created successfully");
+    progressCallback({
+      status: "saving",
+      message: "Saving vector store...",
+      percentage: 99,
+    });
+
     const vectorStorePath = path.join(folderPath, ".vector_store");
     await vectorStore.save(vectorStorePath);
     console.log(`Vector store saved to ${vectorStorePath}`);
+    progressCallback({
+      status: "saved",
+      message: "Vector store saved successfully",
+      percentage: 100,
+    });
+
     return vectorStore;
   } catch (error) {
     console.error("Error in createVectorStore:", error);
+    progressCallback({
+      status: "error",
+      message: `Error creating vector store: ${error.message}`,
+      percentage: 100,
+    });
     throw error;
   }
 }
@@ -675,25 +729,35 @@ async function loadOrCreateVectorStore(folderPath, progressCallback) {
     progressCallback({
       status: "loading",
       message: "Loading existing vector store...",
+      percentage: 0,
     });
     const embeddings = await createEmbeddings();
-    vectorStore = await FaissStore.load(vectorStorePath, embeddings);
-    console.log("Existing vector store loaded successfully");
-    progressCallback({
-      status: "loaded",
-      message: "Existing vector store loaded successfully",
-    });
+    try {
+      vectorStore = await FaissStore.load(vectorStorePath, embeddings);
+      console.log("Existing vector store loaded successfully");
+      progressCallback({
+        status: "loaded",
+        message: "Existing vector store loaded successfully",
+        percentage: 100,
+      });
+    } catch (loadError) {
+      console.error("Error loading existing vector store:", loadError);
+      console.log("Creating new vector store...");
+      progressCallback({
+        status: "creating",
+        message: "Creating new vector store...",
+        percentage: 0,
+      });
+      vectorStore = await createVectorStore(folderPath, progressCallback);
+    }
   } catch (error) {
     console.log("No existing vector store found. Creating new one...");
     progressCallback({
       status: "creating",
       message: "Creating new vector store...",
+      percentage: 0,
     });
-    vectorStore = await createVectorStore(folderPath);
-    progressCallback({
-      status: "created",
-      message: "New vector store created successfully",
-    });
+    vectorStore = await createVectorStore(folderPath, progressCallback);
   }
 
   try {
@@ -701,18 +765,26 @@ async function loadOrCreateVectorStore(folderPath, progressCallback) {
     progressCallback({
       status: "updating",
       message: "Checking for new files...",
+      percentage: 0,
     });
-    vectorStore = await updateVectorStore(folderPath, vectorStore);
+
+    vectorStore = await updateVectorStore(
+      folderPath,
+      vectorStore,
+      progressCallback
+    );
     console.log("Vector store update check completed");
     progressCallback({
       status: "updated",
-      message: "Vector store update check completed",
+      message: "Vector store update completed",
+      percentage: 100,
     });
   } catch (updateError) {
     console.error("Error updating vector store:", updateError);
     progressCallback({
       status: "error",
       message: `Error updating vector store: ${updateError.message}`,
+      percentage: 100,
     });
   }
 
@@ -726,7 +798,7 @@ async function loadOrCreateVectorStore(folderPath, progressCallback) {
 }
 
 // Update the updateVectorStore function
-async function updateVectorStore(folderPath, vectorStore) {
+async function updateVectorStore(folderPath, vectorStore, progressCallback) {
   const loaders = {
     ".txt": (path) => new TextLoader(path),
     ".json": (path) => new JSONLoader(path),
@@ -754,10 +826,14 @@ async function updateVectorStore(folderPath, vectorStore) {
   try {
     const docs = await loader.load();
     console.log(`Loaded ${docs.length} documents`);
+    progressCallback({
+      status: "checking",
+      message: `Checking ${docs.length} documents...`,
+      percentage: 20,
+    });
 
     let needsReinitialization = false;
     try {
-      // Try to perform a similarity search with a dummy query
       await vectorStore.similaritySearch("test query", 1);
     } catch (error) {
       console.error("Error performing similarity search:", error);
@@ -766,11 +842,21 @@ async function updateVectorStore(folderPath, vectorStore) {
 
     if (needsReinitialization) {
       console.log("Reinitializing vector store due to error...");
+      progressCallback({
+        status: "reinitializing",
+        message: "Reinitializing vector store...",
+        percentage: 40,
+      });
       const embeddings = await createEmbeddings();
       vectorStore = await FaissStore.fromDocuments(docs, embeddings);
       const vectorStorePath = path.join(folderPath, ".vector_store");
       await vectorStore.save(vectorStorePath);
       console.log("Vector store reinitialized and saved successfully");
+      progressCallback({
+        status: "reinitialized",
+        message: "Vector store reinitialized and saved successfully",
+        percentage: 100,
+      });
       return vectorStore;
     }
 
@@ -787,13 +873,28 @@ async function updateVectorStore(folderPath, vectorStore) {
       console.log(
         `Adding ${newDocs.length} new documents to the vector store...`
       );
+      progressCallback({
+        status: "updating",
+        message: `Adding ${newDocs.length} new documents...`,
+        percentage: 60,
+      });
       const embeddings = await createEmbeddings();
       await vectorStore.addDocuments(newDocs);
       const vectorStorePath = path.join(folderPath, ".vector_store");
       await vectorStore.save(vectorStorePath);
       console.log("Vector store updated and saved successfully");
+      progressCallback({
+        status: "updated",
+        message: "Vector store updated and saved successfully",
+        percentage: 100,
+      });
     } else {
       console.log("No new documents found. Vector store is up to date.");
+      progressCallback({
+        status: "upToDate",
+        message: "Vector store is up to date",
+        percentage: 100,
+      });
     }
     return vectorStore;
   } catch (error) {

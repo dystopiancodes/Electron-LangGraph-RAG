@@ -193,3 +193,8 @@ ipcMain.handle("load-or-create-vector-store", async (event, folderPath) => {
 ipcMain.handle("set-tavily-search-enabled", (event, isEnabled) => {
   store.set("tavilySearchEnabled", isEnabled);
 });
+
+// Add this handler near the other IPC handlers
+ipcMain.handle("get-tavily-search-enabled", () => {
+  return store.get("tavilySearchEnabled", false);
+});
