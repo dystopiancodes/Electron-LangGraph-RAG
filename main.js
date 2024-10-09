@@ -21,11 +21,9 @@ global.XMLHttpRequest = XMLHttpRequest;
 
 const { app, BrowserWindow, ipcMain } = require("electron");
 const Store = require("electron-store");
+const log = require("electron-log");
 
 const store = new Store();
-
-// Remove this line
-// const { checkOllamaServer } = require("./src/rag");
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -38,10 +36,16 @@ function createWindow() {
   });
 
   win.loadFile("index.html");
+
+  win.webContents.on(
+    "console-message",
+    (event, level, message, line, sourceId) => {
+      log.info(`Renderer Console: ${message}`);
+    }
+  );
 }
 
 app.whenReady().then(async () => {
-  // Remove the Ollama server check
   createWindow();
 
   app.on("activate", () => {
@@ -49,6 +53,12 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+
+  log.info("App is ready");
+  log.info("Electron app version:", app.getVersion());
+  log.info("Electron version:", process.versions.electron);
+  log.info("Chrome version:", process.versions.chrome);
+  log.info("Node version:", process.versions.node);
 });
 
 app.on("window-all-closed", () => {
@@ -57,7 +67,6 @@ app.on("window-all-closed", () => {
   }
 });
 
-// Add this function to send step updates
 function sendStepUpdate(step) {
   const windows = BrowserWindow.getAllWindows();
   if (windows.length > 0) {
@@ -65,7 +74,6 @@ function sendStepUpdate(step) {
   }
 }
 
-// Add this function to send log updates
 function sendLogUpdate(step, log) {
   const windows = BrowserWindow.getAllWindows();
   if (windows.length > 0) {
@@ -73,27 +81,21 @@ function sendLogUpdate(step, log) {
   }
 }
 
-// Update the invoke-rag handler
+function getTavilyApiKey() {
+  return process.env.TAVILY_API_KEY || store.get("tavilyApiKey");
+}
+
 ipcMain.handle(
   "invoke-rag",
   async (event, { question, model, embeddingModel, isTavilySearchEnabled }) => {
     try {
       const { runRAG, setSearchUrls } = require("./src/rag");
-      const tavilyApiKey = store.get("tavilyApiKey");
+      const tavilyApiKey = getTavilyApiKey();
       const searchUrls = store.get("searchUrls", []);
       const selectedFolderPath = store.get("selectedFolder");
       setSearchUrls(searchUrls, sendLogUpdate);
       sendStepUpdate("route");
-      console.log(
-        "Starting RAG process with question:",
-        question,
-        "LLM model:",
-        model,
-        "Embedding model:",
-        embeddingModel,
-        "Tavily search enabled:",
-        isTavilySearchEnabled
-      );
+      log.info("Starting RAG pipeline");
       const result = await runRAG(
         question,
         model,
@@ -104,35 +106,46 @@ ipcMain.handle(
         isTavilySearchEnabled,
         selectedFolderPath
       );
-      console.log("RAG process completed. Result:", result);
+      log.info("RAG process completed. Result:", result);
       return result;
     } catch (error) {
-      console.error("Error in invoke-rag handler:", error);
+      log.error("Error in invoke-rag handler:", error);
       sendLogUpdate("error", `Error in invoke-rag handler: ${error.message}`);
       return { error: error.message };
     }
   }
 );
 
-// Update this handler for test-ollama
+ipcMain.handle("list-ollama-models", async () => {
+  try {
+    const { listOllamaModels } = require("./src/rag");
+    return await listOllamaModels();
+  } catch (error) {
+    log.error("Error listing Ollama models:", error);
+    return [];
+  }
+});
+
+ipcMain.handle("list-embedding-models", async () => {
+  try {
+    const { listEmbeddingModels } = require("./src/rag");
+    return await listEmbeddingModels();
+  } catch (error) {
+    log.error("Error listing embedding models:", error);
+    return [];
+  }
+});
+
 ipcMain.handle("test-ollama", async (event, model) => {
   const { testOllama } = require("./src/rag");
   return await testOllama(model);
 });
 
-// Update this handler for checking Ollama status
 ipcMain.handle("check-ollama-status", async (event, model) => {
   const { checkOllamaServer } = require("./src/rag");
   return await checkOllamaServer(model);
 });
 
-// Add this new IPC handler
-ipcMain.handle("list-ollama-models", async () => {
-  const { listOllamaModels } = require("./src/rag");
-  return await listOllamaModels();
-});
-
-// Add these new IPC handlers
 ipcMain.handle("save-tavily-api-key", async (event, apiKey) => {
   store.set("tavilyApiKey", apiKey);
 });
@@ -141,16 +154,14 @@ ipcMain.handle("get-tavily-api-key", async () => {
   return store.get("tavilyApiKey");
 });
 
-// Add these new IPC handlers
 ipcMain.handle("save-search-urls", async (event, urls) => {
   store.set("searchUrls", urls);
 });
 
 ipcMain.handle("get-search-urls", async () => {
-  return store.get("searchUrls", []); // Return an empty array if no URLs are saved
+  return store.get("searchUrls", []);
 });
 
-// Add these new IPC handlers
 ipcMain.handle("save-selected-model", async (event, model) => {
   store.set("selectedModel", model);
 });
@@ -159,7 +170,6 @@ ipcMain.handle("get-selected-model", async () => {
   return store.get("selectedModel", "");
 });
 
-// Add folder selection and vector store management handlers
 const { dialog } = require("electron");
 const fs = require("fs").promises;
 
@@ -184,28 +194,20 @@ ipcMain.handle("load-or-create-vector-store", async (event, folderPath) => {
       event.sender.send("indexing-progress", progress);
     };
     const result = await loadOrCreateVectorStore(folderPath, sendProgress);
-    console.log("Vector store operation result:", result);
+    log.info("Vector store operation result:", result);
     return result;
   } catch (error) {
-    console.error("Error in load-or-create-vector-store handler:", error);
+    log.error("Error in load-or-create-vector-store handler:", error);
     return { success: false, error: error.message };
   }
 });
 
-// Add this new IPC handler
 ipcMain.handle("set-tavily-search-enabled", (event, isEnabled) => {
   store.set("tavilySearchEnabled", isEnabled);
 });
 
-// Add this handler near the other IPC handlers
 ipcMain.handle("get-tavily-search-enabled", () => {
   return store.get("tavilySearchEnabled", false);
-});
-
-// Add these new IPC handlers
-ipcMain.handle("list-embedding-models", async () => {
-  const { listEmbeddingModels } = require("./src/rag");
-  return await listEmbeddingModels();
 });
 
 ipcMain.handle("save-selected-embedding-model", async (event, model) => {

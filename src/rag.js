@@ -1,6 +1,11 @@
 // At the top of the file, add:
 let sendLogUpdate;
 
+// Near the top of the file, add:
+const log = require("electron-log");
+const dotenv = require("dotenv");
+dotenv.config();
+
 function tryRequire(moduleName) {
   try {
     return require(moduleName);
@@ -28,9 +33,6 @@ const {
   JsonOutputParser,
   StringOutputParser,
 } = require("@langchain/core/output_parsers");
-const {
-  TavilySearchResults,
-} = require("@langchain/community/tools/tavily_search");
 const { Document } = require("@langchain/core/documents");
 const { Runnable } = require("@langchain/core/runnables");
 const { retry } = require("@langchain/core/utils/async_caller");
@@ -45,6 +47,7 @@ const { FaissStore } = require("langchain/vectorstores/faiss");
 // Add this function near the top of the file, after the imports
 async function checkOllamaServer(model) {
   try {
+    log.info(`Checking Ollama server for model: ${model}`);
     const response = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
       headers: {
@@ -57,14 +60,14 @@ async function checkOllamaServer(model) {
       }),
     });
     if (response.ok) {
-      console.log("Ollama server is running.");
+      log.info("Ollama server is running.");
       return true;
     } else {
-      console.error("Error connecting to Ollama server:", response.statusText);
+      log.error("Error connecting to Ollama server:", response.statusText);
       return false;
     }
   } catch (error) {
-    console.error("Error connecting to Ollama server:", error.message);
+    log.error("Error connecting to Ollama server:", error.message);
     return false;
   }
 }
@@ -209,7 +212,7 @@ let searchUrls = [];
 // Update the initializeVectorStore function
 async function initializeVectorStore() {
   try {
-    console.log("Starting vector store initialization");
+    log.info("Starting vector store initialization");
     console.log("Retrieved search URLs:", searchUrls);
 
     if (!searchUrls || searchUrls.length === 0) {
@@ -325,11 +328,16 @@ const retrievalGrader = graderPrompt
   .pipe(new JsonOutputParser({ strict: false }));
 const rewriter = rewriterPrompt.pipe(llm).pipe(new StringOutputParser());
 
-// Update the webSearchTool initialization
-const webSearchTool = new TavilySearchResults({
-  maxResults: 3,
-  apiKey: null, // We'll set this dynamically
-});
+// Instead, add this function to create the TavilySearchResults instance only when needed
+function createTavilySearchTool(apiKey) {
+  if (!apiKey) {
+    throw new Error("Tavily API key is not set");
+  }
+  const {
+    TavilySearchResults,
+  } = require("@langchain/community/tools/tavily_search");
+  return new TavilySearchResults({ apiKey });
+}
 
 // Define graph nodes
 const retrieve = async (state) => {
@@ -518,12 +526,14 @@ const transformQuery = async (state) => {
   return { question: betterQuestion };
 };
 
+// Update the webSearch function to use the createTavilySearchTool function
 const webSearch = async (state) => {
   console.log("---WEB SEARCH---");
   try {
-    if (!webSearchTool.apiKey) {
+    if (!state.tavilyApiKey) {
       throw new Error("Tavily API key is not set");
     }
+    const webSearchTool = createTavilySearchTool(state.tavilyApiKey);
     console.log("Performing web search with question:", state.question);
     const searchResults = await webSearchTool.invoke(state.question);
     console.log("Web search results:", searchResults);
@@ -619,19 +629,36 @@ const app = workflow.compile();
 // Export a function to run the RAG pipeline
 const { Ollama } = require("@langchain/community/llms/ollama");
 
+// Update the listOllamaModels function
+async function listOllamaModels() {
+  try {
+    log.info("Attempting to list Ollama models");
+    const response = await fetch("http://localhost:11434/api/tags");
+    if (!response.ok) {
+      log.error(`Failed to fetch Ollama models. Status: ${response.status}`);
+      return [];
+    }
+    const data = await response.json();
+    if (!data.models || !Array.isArray(data.models)) {
+      log.error("Unexpected response format from Ollama API:", data);
+      return [];
+    }
+    log.info("Available Ollama models:", data.models);
+    return data.models.map((model) => model.name);
+  } catch (error) {
+    log.error("Error listing Ollama models:", error.message);
+    return [];
+  }
+}
+
 // Add this function to list embedding models
 async function listEmbeddingModels() {
   try {
-    const response = await fetch("http://localhost:11434/api/tags");
-    const data = await response.json();
-    console.log("Available Ollama models:", data.models);
-    // Filter models that are suitable for embeddings (you may need to adjust this filter)
-    const embeddingModels = data.models
-      .filter((model) => model.name.toLowerCase().includes("embed"))
-      .map((model) => model.name);
-    return embeddingModels;
+    log.info("Listing embedding models");
+    // For now, we'll return a static list. You can expand this later.
+    return ["mxbai-embed-large:latest"];
   } catch (error) {
-    console.error("Error listing Ollama embedding models:", error.message);
+    log.error("Error listing embedding models:", error.message);
     return [];
   }
 }
@@ -973,15 +1000,14 @@ async function runRAG(
 
     let routeDecision = "vectorstore";
     if (isTavilySearchEnabled) {
-      const routeResponse = await jsonModeLlm(
-        `${QUESTION_ROUTER_SYSTEM_TEMPLATE}\n\nHuman: ${question}`
-      );
-      console.log("Route response:", routeResponse);
-      sendLogUpdate(
-        "route",
-        `Router decision: ${JSON.stringify(routeResponse, null, 2)}`
-      );
-      routeDecision = routeResponse.datasource;
+      if (!tavilyApiKey) {
+        log.warn("Tavily search is enabled but no API key is provided");
+        sendLogUpdate(
+          "warning",
+          "Tavily search is enabled but no API key is provided. Web search will be skipped."
+        );
+        isTavilySearchEnabled = false;
+      }
     }
 
     console.log("Route decision:", routeDecision);
@@ -992,18 +1018,8 @@ async function runRAG(
       sendStepUpdate("web_search");
       sendLogUpdate("web_search", "Performing web search...");
 
-      if (!tavilyApiKey) {
-        console.log("Tavily API key not set");
-        sendLogUpdate("error", "Tavily API key not set");
-        return {
-          error:
-            "Tavily API key not set. Please set the API key and try again.",
-        };
-      }
-
-      webSearchTool.apiKey = tavilyApiKey;
       try {
-        const searchResults = await webSearch({ question });
+        const searchResults = await webSearch({ question, tavilyApiKey });
         console.log("Web search results:", searchResults);
         sendLogUpdate("web_search", JSON.stringify(searchResults, null, 2));
         // Update relevantDocs with the search results
@@ -1167,12 +1183,21 @@ async function testOllama(model) {
 // Add this function near the end of the file
 async function listOllamaModels() {
   try {
+    log.info("Attempting to list Ollama models");
     const response = await fetch("http://localhost:11434/api/tags");
+    if (!response.ok) {
+      log.error(`Failed to fetch Ollama models. Status: ${response.status}`);
+      return [];
+    }
     const data = await response.json();
-    console.log("Available Ollama models:", data.models);
-    return data.models.map((model) => model.name); // Return an array of model names
+    if (!data.models || !Array.isArray(data.models)) {
+      log.error("Unexpected response format from Ollama API:", data);
+      return [];
+    }
+    log.info("Available Ollama models:", data.models);
+    return data.models.map((model) => model.name);
   } catch (error) {
-    console.error("Error listing Ollama models:", error.message);
+    log.error("Error listing Ollama models:", error.message);
     return [];
   }
 }
