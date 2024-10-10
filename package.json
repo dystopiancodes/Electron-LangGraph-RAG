@@ -25,5 +25,25 @@
   "devDependencies": {
     "electron": "^22.0.0",
     "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "extraResources": [
+      {
+        "from": "node_modules/pdf-parse",
+        "to": "pdf-parse"
+      },
+      {
+        "from": "node_modules/node-ensure",
+        "to": "node-ensure"
+      },
+      {
+        "from": "node_modules/faiss-node",
+        "to": "faiss-node"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/faiss-node/**/*"
+    ]
   }
 }

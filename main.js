@@ -25,6 +25,20 @@ const log = require("electron-log");
 
 const store = new Store();
 
+const path = require("path");
+const isProd = process.env.NODE_ENV === "production";
+
+if (isProd) {
+  const pdfParsePath = path.join(process.resourcesPath, "pdf-parse");
+  const nodeEnsurePath = path.join(process.resourcesPath, "node-ensure");
+  const faissNodePath = path.join(process.resourcesPath, "faiss-node");
+  require("module").globalPaths.push(
+    pdfParsePath,
+    nodeEnsurePath,
+    faissNodePath
+  );
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 800,
