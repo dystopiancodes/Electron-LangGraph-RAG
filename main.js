@@ -19,13 +19,14 @@ global.Response = nodeFetch.Response;
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 global.XMLHttpRequest = XMLHttpRequest;
 
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const Store = require("electron-store");
 const log = require("electron-log");
+const path = require("path");
+const fs = require("fs").promises;
 
 const store = new Store();
 
-const path = require("path");
 const isProd = process.env.NODE_ENV === "production";
 
 if (isProd) {
@@ -37,6 +38,21 @@ if (isProd) {
     nodeEnsurePath,
     faissNodePath
   );
+}
+
+// Add this function
+function ensureWritePermissions(folderPath) {
+  try {
+    fs.access(folderPath, fs.constants.W_OK);
+    console.log(`Write permissions confirmed for ${folderPath}`);
+    log.info(`Write permissions confirmed for ${folderPath}`);
+  } catch (err) {
+    console.error(`No write permissions for ${folderPath}:`, err);
+    log.error(`No write permissions for ${folderPath}:`, err);
+    throw new Error(
+      `No write permissions for the selected folder: ${folderPath}`
+    );
+  }
 }
 
 function createWindow() {
@@ -51,10 +67,24 @@ function createWindow() {
 
   win.loadFile("index.html");
 
+  // Add this at the top of the file
+  const _ = require("lodash");
+
+  // Replace the existing console message event listener with this:
+  let lastLogTime = Date.now();
+  const throttledConsoleLog = _.throttle((message) => {
+    const now = Date.now();
+    if (now - lastLogTime > 1000) {
+      // Only log once per second
+      log.info(`Renderer Console: ${message}`);
+      lastLogTime = now;
+    }
+  }, 1000);
+
   win.webContents.on(
     "console-message",
     (event, level, message, line, sourceId) => {
-      log.info(`Renderer Console: ${message}`);
+      throttledConsoleLog(message);
     }
   );
 }
@@ -184,9 +214,6 @@ ipcMain.handle("get-selected-model", async () => {
   return store.get("selectedModel", "");
 });
 
-const { dialog } = require("electron");
-const fs = require("fs").promises;
-
 ipcMain.handle("select-folder", async () => {
   const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   if (!result.canceled) {
@@ -203,6 +230,7 @@ ipcMain.handle("get-selected-folder", () => {
 
 ipcMain.handle("load-or-create-vector-store", async (event, folderPath) => {
   try {
+    ensureWritePermissions(folderPath);
     const { loadOrCreateVectorStore } = require("./src/rag");
     const sendProgress = (progress) => {
       event.sender.send("indexing-progress", progress);

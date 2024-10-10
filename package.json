@@ -5,7 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "start:debug": "DEBUG=true electron ."
   },
   "dependencies": {
     "@langchain/community": "^0.0.26",
@@ -20,7 +21,8 @@
     "node-fetch": "^2.6.1",
     "pdf-parse": "^1.1.1",
     "web-streams-polyfill": "^3.2.1",
-    "xmlhttprequest": "^1.8.0"
+    "xmlhttprequest": "^1.8.0",
+    "lodash": "^4.17.21"
   },
   "devDependencies": {
     "electron": "^22.0.0",

@@ -1,4 +1,5 @@
 const { ipcRenderer } = require("electron");
+const _ = require("lodash");
 
 document.addEventListener("DOMContentLoaded", () => {
   const settingsIcon = document.getElementById("settings-icon");
@@ -31,4 +32,28 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
   // Add similar error handling for other ipcRenderer.invoke calls
+
+  // Replace the existing indexing-progress event listener with this:
+  const throttledProgressUpdate = _.throttle((progress) => {
+    const loadingStatus = document.getElementById("loadingStatus");
+    const loadingProgress = document.getElementById("loadingProgress");
+
+    loadingStatus.textContent = progress.message;
+
+    if (progress.percentage !== undefined) {
+      loadingProgress.style.width = `${progress.percentage}%`;
+    }
+
+    if (progress.status === "saved") {
+      isLoadingFolder = false;
+      document
+        .getElementById("folderSelectButton")
+        .classList.remove("animate-pulse");
+      document.getElementById("folderLoadingContainer").classList.add("hidden");
+    }
+  }, 100); // Update at most every 100ms
+
+  ipcRenderer.on("indexing-progress", (event, progress) => {
+    throttledProgressUpdate(progress);
+  });
 });
