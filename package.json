@@ -18,15 +18,16 @@
     "electron-store": "^8.1.0",
     "faiss-node": "^0.5.1",
     "langchain": "^0.1.9",
+    "lodash": "^4.17.21",
     "node-fetch": "^2.6.1",
     "pdf-parse": "^1.1.1",
     "web-streams-polyfill": "^3.2.1",
-    "xmlhttprequest": "^1.8.0",
-    "lodash": "^4.17.21"
+    "xmlhttprequest": "^1.8.0"
   },
   "devDependencies": {
     "electron": "^22.0.0",
-    "electron-builder": "^24.0.0"
+    "electron-builder": "^24.0.0",
+    "electron-rebuild": "^3.2.9"
   },
   "build": {
     "extraResources": [
@@ -43,8 +44,23 @@
         "to": "faiss-node"
       }
     ],
-    "asar": true,
+    "asar": false,
     "asarUnpack": [
+      "node_modules/faiss-node/**/*"
+    ],
+    "files": [
+      "**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+      "!.editorconfig",
+      "!**/._*",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+      "!**/{appveyor.yml,.travis.yml,circle.yml}",
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}",
       "node_modules/faiss-node/**/*"
     ]
   }

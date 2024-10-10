@@ -103,6 +103,20 @@ app.whenReady().then(async () => {
   log.info("Electron version:", process.versions.electron);
   log.info("Chrome version:", process.versions.chrome);
   log.info("Node version:", process.versions.node);
+
+  logModulePaths();
+
+  const faissNodePath = path.join(process.resourcesPath, "faiss-node");
+  log.info("Expected faiss-node path:", faissNodePath);
+  log.info("faiss-node exists:", fs.existsSync(faissNodePath));
+
+  if (fs.existsSync(faissNodePath)) {
+    const files = fs.readdirSync(faissNodePath);
+    log.info("faiss-node directory contents:", files);
+  }
+
+  log.info("Process architecture:", process.arch);
+  log.info("Process platform:", process.platform);
 });
 
 app.on("window-all-closed", () => {
@@ -240,6 +254,7 @@ ipcMain.handle("load-or-create-vector-store", async (event, folderPath) => {
     return result;
   } catch (error) {
     log.error("Error in load-or-create-vector-store handler:", error);
+    dialog.showErrorBox("Vector Store Error", error.message);
     return { success: false, error: error.message };
   }
 });

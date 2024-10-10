@@ -77,12 +77,15 @@ try {
   const faissPath =
     process.env.NODE_ENV === "production"
       ? path.join(process.resourcesPath, "faiss-node")
-      : "langchain/vectorstores/faiss";
-  FaissStore = require(faissPath).FaissStore;
+      : "@langchain/community/vectorstores/faiss";
+  const { FaissStore: ImportedFaissStore } = require(faissPath);
+  FaissStore = ImportedFaissStore;
 } catch (error) {
   console.error("Error importing FaissStore:", error);
-  // Fallback to MemoryVectorStore if FaissStore is not available
-  FaissStore = MemoryVectorStore;
+  log.error("Error importing FaissStore:", error);
+  throw new Error(
+    `Failed to import FaissStore. Please ensure faiss-node is properly installed.`
+  );
 }
 
 // Add this function near the top of the file, after the imports
@@ -769,27 +772,13 @@ async function createVectorStore(folderPath, progressCallback) {
       percentage: 40,
     });
 
-    let processedDocs = 0;
     let vectorStore;
     try {
-      vectorStore = await FaissStore.fromDocuments(docs, embeddings, {
-        onProgress: (progress) => {
-          processedDocs++;
-          const percentage =
-            Math.round((processedDocs / docs.length) * 60) + 40; // 40% to 100%
-          progressCallback({
-            status: "vectorizing",
-            message: `Vectorizing document ${processedDocs} of ${docs.length}...`,
-            percentage: Math.min(percentage, 99), // Cap at 99% to show completion only after saving
-          });
-        },
-      });
+      vectorStore = await FaissStore.fromDocuments(docs, embeddings);
     } catch (faissError) {
       console.error("Error creating FaissStore:", faissError);
       log.error("Error creating FaissStore:", faissError);
-      console.log("Falling back to MemoryVectorStore");
-      log.info("Falling back to MemoryVectorStore");
-      vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
+      throw new Error(`Failed to create FaissStore: ${faissError.message}`);
     }
 
     console.log("Vector store created successfully");
@@ -804,24 +793,14 @@ async function createVectorStore(folderPath, progressCallback) {
     console.log(`Attempting to save vector store to: ${vectorStorePath}`);
     log.info(`Attempting to save vector store to: ${vectorStorePath}`);
 
-    if (vectorStore instanceof FaissStore) {
-      try {
-        await vectorStore.save(vectorStorePath);
-        console.log(`Vector store saved to ${vectorStorePath}`);
-        log.info(`Vector store saved to ${vectorStorePath}`);
-      } catch (saveError) {
-        console.error("Error saving vector store:", saveError);
-        log.error("Error saving vector store:", saveError);
-        console.log("Vector store will be kept in memory only");
-        log.info("Vector store will be kept in memory only");
-      }
-    } else {
-      console.log(
-        "MemoryVectorStore does not support saving. Keeping in memory only."
-      );
-      log.info(
-        "MemoryVectorStore does not support saving. Keeping in memory only."
-      );
+    try {
+      await vectorStore.save(vectorStorePath);
+      console.log(`Vector store saved to ${vectorStorePath}`);
+      log.info(`Vector store saved to ${vectorStorePath}`);
+    } catch (saveError) {
+      console.error("Error saving vector store:", saveError);
+      log.error("Error saving vector store:", saveError);
+      throw new Error(`Failed to save vector store: ${saveError.message}`);
     }
 
     progressCallback({
@@ -843,13 +822,11 @@ async function loadOrCreateVectorStore(folderPath, progressCallback) {
   const vectorStorePath = path.join(folderPath, ".vector_store");
   let vectorStore;
 
-  const throttledProgressCallback = _.throttle(progressCallback, 100); // Throttle to 100ms
-
   try {
     // Check if vector store exists
     await fs.access(vectorStorePath);
     console.log("Loading existing vector store...");
-    throttledProgressCallback({
+    progressCallback({
       status: "loading",
       message: "Loading existing vector store...",
       percentage: 0,
@@ -859,23 +836,19 @@ async function loadOrCreateVectorStore(folderPath, progressCallback) {
       vectorStore = await FaissStore.load(vectorStorePath, embeddings);
     } catch (loadError) {
       console.error("Error loading existing vector store:", loadError);
-      console.log("Creating new vector store");
-      vectorStore = await createVectorStore(
-        folderPath,
-        throttledProgressCallback
+      log.error("Error loading existing vector store:", loadError);
+      throw new Error(
+        `Failed to load existing vector store: ${loadError.message}`
       );
     }
   } catch (error) {
     console.log("No existing vector store found. Creating new one...");
-    throttledProgressCallback({
+    progressCallback({
       status: "creating",
       message: "Creating new vector store...",
       percentage: 0,
     });
-    vectorStore = await createVectorStore(
-      folderPath,
-      throttledProgressCallback
-    );
+    vectorStore = await createVectorStore(folderPath, progressCallback);
   }
 
   // Store the vectorStore in a global variable
