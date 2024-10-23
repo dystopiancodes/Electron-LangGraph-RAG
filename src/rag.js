@@ -683,8 +683,28 @@ async function listOllamaModels() {
       log.error("Unexpected response format from Ollama API:", data);
       return [];
     }
-    log.info("Available Ollama models:", data.models);
-    return data.models.map((model) => model.name);
+
+    // Define patterns for embedding models
+    const embeddingPatterns = [
+      /embed/i,
+      /bge/i,
+      /^e5-/i,
+      /^all-mpnet/i,
+      /^all-minilm/i,
+      /^paraphrase-/i,
+      /^sentence-t/i,
+    ];
+
+    // Filter out embedding models
+    const llmModels = data.models
+      .filter(
+        (model) =>
+          !embeddingPatterns.some((pattern) => pattern.test(model.name))
+      )
+      .map((model) => model.name);
+
+    log.info("Available LLM models:", llmModels);
+    return llmModels;
   } catch (error) {
     log.error("Error listing Ollama models:", error.message);
     return [];
@@ -695,8 +715,37 @@ async function listOllamaModels() {
 async function listEmbeddingModels() {
   try {
     log.info("Listing embedding models");
-    // For now, we'll return a static list. You can expand this later.
-    return ["mxbai-embed-large:latest"];
+    const response = await fetch("http://localhost:11434/api/tags");
+    if (!response.ok) {
+      log.error(`Failed to fetch Ollama models. Status: ${response.status}`);
+      return [];
+    }
+    const data = await response.json();
+    if (!data.models || !Array.isArray(data.models)) {
+      log.error("Unexpected response format from Ollama API:", data);
+      return [];
+    }
+
+    // Define a list of known embedding model names or patterns
+    const embeddingPatterns = [
+      /embed/i,
+      /bge/i,
+      /^e5-/i,
+      /^all-mpnet/i,
+      /^all-minilm/i,
+      /^paraphrase-/i,
+      /^sentence-t/i,
+    ];
+
+    // Filter embedding models
+    const embeddingModels = data.models
+      .filter((model) =>
+        embeddingPatterns.some((pattern) => pattern.test(model.name))
+      )
+      .map((model) => model.name);
+
+    log.info("Available embedding models:", embeddingModels);
+    return embeddingModels;
   } catch (error) {
     log.error("Error listing embedding models:", error.message);
     return [];
