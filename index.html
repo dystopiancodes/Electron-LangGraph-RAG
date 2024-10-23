@@ -340,8 +340,16 @@
         const questionInput = document.getElementById("question");
         const question = questionInput.value;
         const model = document.getElementById("model-select").value;
+        const embeddingModel = document.getElementById(
+          "embedding-model-select"
+        ).value;
+
         if (!model) {
           alert("Please select a model first");
+          return;
+        }
+        if (!embeddingModel) {
+          alert("Please select an embedding model first");
           return;
         }
         if (!isConnected || model !== lastTestedModel) {
@@ -355,16 +363,14 @@
         }
 
         const tavilyApiKey = await ipcRenderer.invoke("get-tavily-api-key");
-        if (!tavilyApiKey) {
-          alert("Please set your Tavily API Key first");
-          return;
-        }
+        const isTavilySearchEnabled = document.getElementById(
+          "tavily-search-toggle"
+        ).checked;
 
-        // Clear all logs and reset state
         clearAllLogs();
         resetSteps();
         clearStepLogs();
-        document.getElementById("result").innerText = "";
+        document.getElementById("result").innerHTML = "";
 
         disableInterface(true);
 
@@ -372,22 +378,32 @@
           const result = await ipcRenderer.invoke("invoke-rag", {
             question,
             model,
+            embeddingModel,
             isTavilySearchEnabled,
           });
           if (result.error) {
             document.getElementById(
               "result"
-            ).innerText = `Error: ${result.error}`;
+            ).innerHTML = `<p>Error: ${result.error}</p>`;
           } else {
-            document.getElementById("result").innerText =
-              result.generation || "No answer generated";
+            let resultHtml = `<p>${
+              result.generation || "No answer generated"
+            }</p>`;
+            if (result.sources && result.sources.length > 0) {
+              resultHtml += `<p class="font-bold mt-4">Sources:</p><ul class="list-disc pl-5">`;
+              result.sources.forEach((source) => {
+                resultHtml += `<li><a href="#" class="text-blue-500 hover:underline" onclick="openPdf('${source.filePath}')">${source.fileName}</a></li>`;
+              });
+              resultHtml += `</ul>`;
+            }
+            document.getElementById("result").innerHTML = resultHtml;
           }
           showGeneratedAnswer(); // Show the answer after generation
         } catch (error) {
           console.error("Error asking question:", error);
           document.getElementById(
             "result"
-          ).innerText = `Error: ${error.message}`;
+          ).innerHTML = `<p>Error: ${error.message}</p>`;
           showGeneratedAnswer(); // Show the error message
         } finally {
           disableInterface(false);
@@ -803,6 +819,10 @@
             );
           }
         });
+
+      async function openPdf(filePath) {
+        await ipcRenderer.invoke("open-pdf", filePath);
+      }
     </script>
   </body>
 </html>

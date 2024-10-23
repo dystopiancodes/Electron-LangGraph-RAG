@@ -19,7 +19,7 @@ global.Response = nodeFetch.Response;
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 global.XMLHttpRequest = XMLHttpRequest;
 
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const Store = require("electron-store");
 const log = require("electron-log");
 const path = require("path");
@@ -283,4 +283,17 @@ ipcMain.handle("get-selected-embedding-model", async () => {
 ipcMain.handle("set-selected-model", async (event, model) => {
   const { setSelectedModel } = require("./src/rag");
   setSelectedModel(model);
+});
+
+// Add this new IPC handler
+ipcMain.handle("open-pdf", async (event, filePath) => {
+  try {
+    await shell.openPath(filePath);
+  } catch (error) {
+    console.error("Error opening PDF:", error);
+    dialog.showErrorBox(
+      "Error Opening PDF",
+      `Failed to open the PDF: ${error.message}`
+    );
+  }
 });

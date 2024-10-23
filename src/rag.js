@@ -1203,17 +1203,21 @@ async function runRAG(
     sendStepUpdate("generate");
     sendLogUpdate("generate", "Generating answer...");
     const generatedAnswer = await llm(
-      `Context: ${relevantDocs
-        .map((doc) => doc.pageContent)
-        .join("\n\n")}\n\nQuestion: ${question}\n\nAnswer:`
+      `Context: [${relevantDocs.length} relevant documents]\n\nQuestion: ${question}\n\nAnswer:`
     );
-    console.log("Generated answer:", generatedAnswer);
-    sendLogUpdate("generate", JSON.stringify({ generatedAnswer }, null, 2));
-    return { generation: generatedAnswer };
+    console.log("Answer generated");
+    sendLogUpdate("generate", "Answer generated");
+
+    // Prepare sources information
+    const sources = relevantDocs.map((doc) => ({
+      fileName: path.basename(doc.metadata.source),
+      filePath: doc.metadata.source,
+    }));
+
+    return { generation: generatedAnswer, sources };
   } catch (error) {
     console.error("Error in RAG pipeline:", error);
     sendLogUpdate("error", `Error in RAG pipeline: ${error.message}`);
-    sendLogUpdate("error", JSON.stringify({ error: error.message }, null, 2));
     return { error: error.message || "An unknown error occurred" };
   }
 }
