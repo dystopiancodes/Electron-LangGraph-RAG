@@ -350,18 +350,15 @@
         }
 
         const tavilyApiKey = await ipcRenderer.invoke("get-tavily-api-key");
-        if (!tavilyApiKey) {
-          alert("Please set your Tavily API Key first");
-          return;
+        const isTavilySearchEnabled = document.getElementById(
+          "tavily-search-toggle"
+        ).checked;
+
+        if (isTavilySearchEnabled && !tavilyApiKey) {
+          console.warn(
+            "Tavily search is enabled but no API key is provided. Web search will be skipped."
+          );
         }
-
-        // Clear all logs and reset state
-        clearAllLogs();
-        resetSteps();
-        clearStepLogs();
-        document.getElementById("result").innerText = "";
-
-        disableInterface(true);
 
         try {
           const result = await ipcRenderer.invoke("invoke-rag", {

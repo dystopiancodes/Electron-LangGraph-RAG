@@ -1061,21 +1061,27 @@ async function runRAG(
     sendLogUpdate("route", `Original question: "${question}"`);
 
     let routeDecision = "vectorstore";
-    if (isTavilySearchEnabled) {
-      if (!tavilyApiKey) {
-        log.warn("Tavily search is enabled but no API key is provided");
-        sendLogUpdate(
-          "warning",
-          "Tavily search is enabled but no API key is provided. Web search will be skipped."
-        );
-        isTavilySearchEnabled = false;
-      }
+    if (isTavilySearchEnabled && tavilyApiKey) {
+      // Only consider web search if Tavily is enabled and API key is provided
+      routeDecision = await questionRouter.invoke({
+        question: state.question,
+      });
+    } else {
+      console.log("Tavily search is disabled or API key is missing");
+      sendLogUpdate(
+        "route",
+        "Tavily search is disabled or API key is missing. Using vectorstore."
+      );
     }
 
     console.log("Route decision:", routeDecision);
     sendLogUpdate("route", `Routed to: ${routeDecision}`);
 
-    if (routeDecision === "web_search" && isTavilySearchEnabled) {
+    if (
+      routeDecision === "web_search" &&
+      isTavilySearchEnabled &&
+      tavilyApiKey
+    ) {
       console.log("Performing web search");
       sendStepUpdate("web_search");
       sendLogUpdate("web_search", "Performing web search...");
