@@ -139,8 +139,10 @@ function sendLogUpdate(step, log) {
   }
 }
 
+// Update the getTavilyApiKey function
 function getTavilyApiKey() {
-  return process.env.TAVILY_API_KEY || store.get("tavilyApiKey");
+  const apiKey = process.env.TAVILY_API_KEY || store.get("tavilyApiKey");
+  return apiKey || null; // Return null if no API key is found
 }
 
 ipcMain.handle(
@@ -154,6 +156,8 @@ ipcMain.handle(
       setSearchUrls(searchUrls, sendLogUpdate);
       sendStepUpdate("route");
       log.info("Starting RAG pipeline");
+      log.info("Tavily search enabled:", isTavilySearchEnabled);
+      log.info("Tavily API key present:", !!tavilyApiKey);
       const result = await runRAG(
         question,
         model,

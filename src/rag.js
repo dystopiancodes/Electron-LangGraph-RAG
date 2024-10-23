@@ -576,7 +576,7 @@ const webSearch = async (state) => {
     const webSearchTool = createTavilySearchTool(state.tavilyApiKey);
     console.log("Performing web search with question:", state.question);
     const searchResults = await webSearchTool.invoke(state.question);
-    console.log("Web search results:", searchResults);
+    console.log("Web search completed");
     return {
       documents: [
         new Document({ pageContent: JSON.stringify(searchResults, null, 2) }),
@@ -584,14 +584,7 @@ const webSearch = async (state) => {
     };
   } catch (error) {
     console.error("Web search error:", error);
-    if (error.response) {
-      console.error("Error response:", error.response.data);
-    }
-    return {
-      documents: [
-        new Document({ pageContent: `Web search failed: ${error.message}` }),
-      ],
-    };
+    throw error;
   }
 };
 
@@ -1011,6 +1004,9 @@ async function runRAG(
   try {
     console.log("Starting RAG pipeline");
     sendLogUpdate("start", "Starting RAG pipeline");
+    console.log("Tavily search enabled:", isTavilySearchEnabled);
+    console.log("Tavily API key present:", !!tavilyApiKey);
+
     sendLogUpdate(
       "start",
       JSON.stringify(
@@ -1039,41 +1035,67 @@ async function runRAG(
 
     console.log("Routing question");
     sendStepUpdate("route");
-    sendLogUpdate("route", `Original question: "${question}"`);
+    sendLogUpdate("route", "Routing question");
 
     let routeDecision = "vectorstore";
-    if (isTavilySearchEnabled) {
-      if (!tavilyApiKey) {
-        log.warn("Tavily search is enabled but no API key is provided");
+    if (isTavilySearchEnabled && tavilyApiKey) {
+      console.log("Tavily search is enabled and API key is provided");
+      sendLogUpdate(
+        "route",
+        "Tavily search is enabled and API key is provided"
+      );
+      try {
+        const routeResult = await routeQuestion({ question });
+        routeDecision = routeResult.next;
+      } catch (routeError) {
+        console.error("Error in question routing:", routeError);
         sendLogUpdate(
-          "warning",
-          "Tavily search is enabled but no API key is provided. Web search will be skipped."
+          "route",
+          `Routing error: ${routeError.message}. Using vectorstore.`
         );
-        isTavilySearchEnabled = false;
+      }
+    } else {
+      if (isTavilySearchEnabled && !tavilyApiKey) {
+        console.log("Tavily search is enabled but API key is missing");
+        sendLogUpdate(
+          "route",
+          "Tavily search is enabled but API key is missing. Using vectorstore."
+        );
+      } else {
+        console.log("Tavily search is disabled");
+        sendLogUpdate("route", "Tavily search is disabled. Using vectorstore.");
       }
     }
 
     console.log("Route decision:", routeDecision);
-    sendLogUpdate("route", `Routed to: ${routeDecision}`);
+    sendLogUpdate("route", `Final route decision: ${routeDecision}`);
 
-    if (routeDecision === "web_search" && isTavilySearchEnabled) {
+    if (
+      routeDecision === "web_search" &&
+      isTavilySearchEnabled &&
+      tavilyApiKey
+    ) {
       console.log("Performing web search");
       sendStepUpdate("web_search");
       sendLogUpdate("web_search", "Performing web search...");
 
       try {
         const searchResults = await webSearch({ question, tavilyApiKey });
-        console.log("Web search results:", searchResults);
-        sendLogUpdate("web_search", JSON.stringify(searchResults, null, 2));
-        // Update relevantDocs with the search results
+        console.log("Web search completed");
+        sendLogUpdate("web_search", "Web search completed");
         relevantDocs = searchResults.documents;
       } catch (error) {
         console.error("Web search error:", error);
-        sendLogUpdate("error", `Web search error: ${error.message}`);
-        return { error: `Web search failed: ${error.message}` };
+        sendLogUpdate(
+          "error",
+          `Web search error: ${error.message}. Falling back to vectorstore.`
+        );
+        routeDecision = "vectorstore";
       }
-    } else {
-      console.log("Retrieving documents");
+    }
+
+    if (routeDecision === "vectorstore") {
+      console.log("Retrieving documents from vectorstore");
       sendStepUpdate("retrieve");
       sendLogUpdate("retrieve", "Retrieving relevant documents...");
       try {

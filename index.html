@@ -157,7 +157,7 @@
         </div>
         <div
           class="step queued flex flex-col items-center p-2 rounded"
-          onclick="showStepLog('generate')"
+          onclick="showGeneratedAnswer()"
           data-step="generate"
         >
           <span class="material-icons">psychology</span>
@@ -169,7 +169,7 @@
         id="stepLog"
         class="mt-4 p-4 bg-gray-100 rounded hidden overflow-auto max-h-96"
       ></div>
-      <div id="result" class="mt-4 p-4 bg-gray-100 rounded"></div>
+      <div id="result" class="mt-4 p-4 bg-gray-100 rounded hidden"></div>
     </div>
 
     <!-- Settings Modal -->
@@ -377,11 +377,13 @@
             document.getElementById("result").innerText =
               result.generation || "No answer generated";
           }
+          showGeneratedAnswer(); // Show the answer after generation
         } catch (error) {
           console.error("Error asking question:", error);
           document.getElementById(
             "result"
           ).innerText = `Error: ${error.message}`;
+          showGeneratedAnswer(); // Show the error message
         } finally {
           disableInterface(false);
         }
@@ -501,6 +503,8 @@
         stepElement.classList.add("selected");
 
         const logElement = document.getElementById("stepLog");
+        const resultElement = document.getElementById("result");
+
         logElement.innerHTML = `<h3 class="font-bold mb-2">${
           step.charAt(0).toUpperCase() + step.slice(1)
         } Log:</h3>`;
@@ -526,6 +530,28 @@
           logElement.innerHTML += "<p>No logs available for this step.</p>";
         }
         logElement.classList.remove("hidden");
+        resultElement.classList.add("hidden");
+      }
+
+      // Add a new function to show only the generated answer
+      function showGeneratedAnswer() {
+        const stepElement = document.querySelector('[data-step="generate"]');
+        if (stepElement.classList.contains("queued")) {
+          return; // Don't show answer for queued step
+        }
+
+        // Remove 'selected' class from all steps
+        document
+          .querySelectorAll(".step")
+          .forEach((el) => el.classList.remove("selected"));
+        // Add 'selected' class to the generate step
+        stepElement.classList.add("selected");
+
+        const logElement = document.getElementById("stepLog");
+        const resultElement = document.getElementById("result");
+
+        logElement.classList.add("hidden");
+        resultElement.classList.remove("hidden");
       }
 
       async function saveSelectedModel(model) {
