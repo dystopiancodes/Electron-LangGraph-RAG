@@ -202,7 +202,7 @@
             </select>
           </div>
 
-          <!-- Add this after the LLM model selection in the settings modal -->
+          <!-- Embedding model selection -->
           <div class="mb-4">
             <label
               for="embedding-model-select"
@@ -217,17 +217,11 @@
             </select>
           </div>
 
-          <!-- Load and Test Model buttons -->
+          <!-- Test Ollama button -->
           <div class="flex mb-4">
             <button
-              onclick="loadModels()"
-              class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mr-2"
-            >
-              Load Models
-            </button>
-            <button
               onclick="testOllama()"
-              class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+              class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 w-full"
             >
               Test Ollama
             </button>
@@ -774,7 +768,21 @@
         document.getElementById("tavily-search-toggle").checked = tavilyEnabled;
 
         // Load models
-        await loadModels();
+        const models = await ipcRenderer.invoke("list-ollama-models");
+        const select = document.getElementById("model-select");
+        select.innerHTML = '<option value="">Select a model</option>';
+        models.forEach((model) => {
+          const option = document.createElement("option");
+          option.value = model;
+          option.textContent = model;
+          select.appendChild(option);
+        });
+
+        // Load the previously selected model
+        const savedModel = await ipcRenderer.invoke("get-selected-model");
+        if (savedModel) {
+          select.value = savedModel;
+        }
 
         // Load embedding models
         const embeddingModels = await ipcRenderer.invoke(
