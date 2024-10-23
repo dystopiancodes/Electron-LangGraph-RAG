@@ -12,6 +12,9 @@
     <style>
       .step {
         transition: all 0.3s ease;
+        border: 2px solid transparent;
+        cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       }
       .step.active {
         background-color: #4caf50;
@@ -19,15 +22,17 @@
       }
       .step.queued {
         opacity: 0.5;
-        cursor: not-allowed;
       }
       .step.completed {
         opacity: 0.8;
-        cursor: pointer;
       }
       .step.selected {
-        border: 2px solid #2196f3;
-        background-color: #e3f2fd;
+        background-color: #45a049;
+        color: white;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      }
+      .step:hover:not(.queued) {
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
       }
       .disabled {
         opacity: 0.5;
@@ -468,15 +473,15 @@
           const currentStepName = step.getAttribute("data-step");
           if (currentStepName === stepName) {
             step.classList.remove("queued", "completed");
-            step.classList.add("active");
+            step.classList.add("active", "selected");
             step.style.pointerEvents = "auto";
             foundCurrentStep = true;
           } else if (!foundCurrentStep) {
-            step.classList.remove("queued", "active");
+            step.classList.remove("queued", "active", "selected");
             step.classList.add("completed");
             step.style.pointerEvents = "auto";
           } else {
-            step.classList.remove("active", "completed");
+            step.classList.remove("active", "completed", "selected");
             step.classList.add("queued");
             step.style.pointerEvents = "none";
           }
@@ -541,11 +546,18 @@
         }
 
         // Remove 'selected' class from all steps
-        document
-          .querySelectorAll(".step")
-          .forEach((el) => el.classList.remove("selected"));
-        // Add 'selected' class to the generate step
-        stepElement.classList.add("selected");
+        document.querySelectorAll(".step").forEach((el) => {
+          el.classList.remove("selected", "active");
+          if (
+            !el.classList.contains("completed") &&
+            !el.classList.contains("queued")
+          ) {
+            el.classList.add("completed");
+          }
+        });
+        // Add 'selected' and 'active' classes to the generate step
+        stepElement.classList.add("selected", "active");
+        stepElement.classList.remove("completed", "queued");
 
         const logElement = document.getElementById("stepLog");
         const resultElement = document.getElementById("result");
