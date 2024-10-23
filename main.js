@@ -40,9 +40,6 @@ if (isProd) {
   );
 }
 
-// Near the top of the file, add:
-const DEFAULT_TAVILY_ENABLED = false;
-
 // Add this function
 function ensureWritePermissions(folderPath) {
   try {
@@ -143,7 +140,7 @@ function sendLogUpdate(step, log) {
 }
 
 function getTavilyApiKey() {
-  return store.get("tavilyApiKey", "");
+  return process.env.TAVILY_API_KEY || store.get("tavilyApiKey");
 }
 
 ipcMain.handle(
@@ -267,7 +264,7 @@ ipcMain.handle("set-tavily-search-enabled", (event, isEnabled) => {
 });
 
 ipcMain.handle("get-tavily-search-enabled", () => {
-  return store.get("tavilySearchEnabled", DEFAULT_TAVILY_ENABLED);
+  return store.get("tavilySearchEnabled", false);
 });
 
 ipcMain.handle("save-selected-embedding-model", async (event, model) => {

@@ -684,22 +684,12 @@ async function listOllamaModels() {
       return [];
     }
 
-    // Define patterns for embedding models
-    const embeddingPatterns = [
-      /embed/i,
-      /bge/i,
-      /^e5-/i,
-      /^all-mpnet/i,
-      /^all-minilm/i,
-      /^paraphrase-/i,
-      /^sentence-t/i,
-    ];
-
-    // Filter out embedding models
+    // Filter out non-embedding models
     const llmModels = data.models
       .filter(
         (model) =>
-          !embeddingPatterns.some((pattern) => pattern.test(model.name))
+          !model.name.toLowerCase().includes("embed") &&
+          !model.name.toLowerCase().includes("bge")
       )
       .map((model) => model.name);
 
@@ -726,21 +716,12 @@ async function listEmbeddingModels() {
       return [];
     }
 
-    // Define a list of known embedding model names or patterns
-    const embeddingPatterns = [
-      /embed/i,
-      /bge/i,
-      /^e5-/i,
-      /^all-mpnet/i,
-      /^all-minilm/i,
-      /^paraphrase-/i,
-      /^sentence-t/i,
-    ];
-
-    // Filter embedding models
+    // Filter out embedding models
     const embeddingModels = data.models
-      .filter((model) =>
-        embeddingPatterns.some((pattern) => pattern.test(model.name))
+      .filter(
+        (model) =>
+          model.name.toLowerCase().includes("embed") ||
+          model.name.toLowerCase().includes("bge")
       )
       .map((model) => model.name);
 
@@ -1061,27 +1042,21 @@ async function runRAG(
     sendLogUpdate("route", `Original question: "${question}"`);
 
     let routeDecision = "vectorstore";
-    if (isTavilySearchEnabled && tavilyApiKey) {
-      // Only consider web search if Tavily is enabled and API key is provided
-      routeDecision = await questionRouter.invoke({
-        question: state.question,
-      });
-    } else {
-      console.log("Tavily search is disabled or API key is missing");
-      sendLogUpdate(
-        "route",
-        "Tavily search is disabled or API key is missing. Using vectorstore."
-      );
+    if (isTavilySearchEnabled) {
+      if (!tavilyApiKey) {
+        log.warn("Tavily search is enabled but no API key is provided");
+        sendLogUpdate(
+          "warning",
+          "Tavily search is enabled but no API key is provided. Web search will be skipped."
+        );
+        isTavilySearchEnabled = false;
+      }
     }
 
     console.log("Route decision:", routeDecision);
     sendLogUpdate("route", `Routed to: ${routeDecision}`);
 
-    if (
-      routeDecision === "web_search" &&
-      isTavilySearchEnabled &&
-      tavilyApiKey
-    ) {
+    if (routeDecision === "web_search" && isTavilySearchEnabled) {
       console.log("Performing web search");
       sendStepUpdate("web_search");
       sendLogUpdate("web_search", "Performing web search...");
