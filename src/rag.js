@@ -170,11 +170,7 @@ async function jsonModeLlm(input) {
   const promptString =
     typeof input === "string" ? input : JSON.stringify(input);
   try {
-    const result = await callOllama(
-      "llama3.2:3b-instruct-fp16",
-      promptString,
-      true
-    );
+    const result = await callOllama(selectedModel, promptString, true);
     console.log("Raw jsonModeLlm result:", result);
 
     if (typeof result === "object" && result !== null) {
@@ -206,7 +202,7 @@ async function jsonModeLlm(input) {
 async function llm(input) {
   const promptString =
     typeof input === "string" ? input : JSON.stringify(input);
-  return callOllama("llama3.2:3b-instruct-fp16", promptString);
+  return callOllama(selectedModel, promptString);
 }
 
 // Update the getEmbeddings function
@@ -977,8 +973,8 @@ async function runRAG(
   isTavilySearchEnabled,
   selectedFolderPath
 ) {
-  // Set the global embedding model
-  global.selectedEmbeddingModel = embeddingModel;
+  // Set the selected model
+  setSelectedModel(llmModel);
 
   sendLogUpdate = logUpdateFunction;
   let relevantDocs = [];
@@ -1225,6 +1221,15 @@ function setSearchUrls(urls, logUpdateFunction) {
   sendLogUpdate = logUpdateFunction;
 }
 
+// Add this function to set the selected model
+let selectedModel = "llama3.2:3b-instruct-fp16"; // Default model
+
+function setSelectedModel(model) {
+  selectedModel = model;
+  console.log(`Selected model set to: ${selectedModel}`);
+  log.info(`Selected model set to: ${selectedModel}`);
+}
+
 // Update the module.exports
 module.exports = {
   runRAG,
@@ -1234,4 +1239,5 @@ module.exports = {
   listEmbeddingModels,
   setSearchUrls,
   loadOrCreateVectorStore,
+  setSelectedModel, // Add this line
 };

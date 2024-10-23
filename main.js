@@ -274,3 +274,9 @@ ipcMain.handle("save-selected-embedding-model", async (event, model) => {
 ipcMain.handle("get-selected-embedding-model", async () => {
   return store.get("selectedEmbeddingModel", "");
 });
+
+// Add this near your other ipcMain handlers
+ipcMain.handle("set-selected-model", async (event, model) => {
+  const { setSelectedModel } = require("./src/rag");
+  setSelectedModel(model);
+});
