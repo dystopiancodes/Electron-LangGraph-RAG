@@ -57,6 +57,9 @@
       .animate-pulse {
         animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
       }
+      .whitespace-pre-wrap {
+        white-space: pre-wrap;
+      }
     </style>
   </head>
   <body class="bg-gray-100 p-8">
@@ -380,8 +383,10 @@
               "result"
             ).innerHTML = `<p>Error: ${result.error}</p>`;
           } else {
-            let resultHtml = `<p>${
-              result.generation || "No answer generated"
+            // Replace newline characters with <br> tags
+            let formattedAnswer = result.generation.replace(/\n/g, "<br>");
+            let resultHtml = `<p class="whitespace-pre-wrap">${
+              formattedAnswer || "No answer generated"
             }</p>`;
             if (result.sources && result.sources.length > 0) {
               resultHtml += `<p class="font-bold mt-4">Sources:</p><ul class="list-disc pl-5">`;
