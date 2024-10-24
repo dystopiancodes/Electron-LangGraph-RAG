@@ -51,25 +51,17 @@ export class OllamaLLMService implements LLMService {
 }
 
 export class OllamaEmbeddingService implements EmbeddingService {
-  async generateEmbeddings(
-    text: string | string[]
-  ): Promise<number[] | number[][]> {
-    const texts = Array.isArray(text) ? text : [text];
-    const embeddings = await Promise.all(
-      texts.map(async (t) => {
-        const response = await fetch(`${OLLAMA_API_URL}/api/embeddings`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: t,
-            model: "mxbai-embed-large:latest",
-          }),
-        });
-        const data = await response.json();
-        return data.embedding;
-      })
-    );
-    return Array.isArray(text) ? embeddings : embeddings[0];
+  async generateEmbeddings(text: string): Promise<number[]> {
+    const response = await fetch(`${OLLAMA_API_URL}/api/embeddings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: text,
+        model: "mxbai-embed-large:latest",
+      }),
+    });
+    const data = await response.json();
+    return data.embedding;
   }
 
   async listModels(): Promise<string[]> {

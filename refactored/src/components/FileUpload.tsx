@@ -15,10 +15,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
     className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg ${
       isDragging ? "border-blue-500 bg-blue-50" : ""
     }`}
-    onDragEnter={() => {}}
-    onDragLeave={() => {}}
-    onDragOver={(e) => e.preventDefault()}
     onDrop={handleDrop}
+    onDragOver={(e) => e.preventDefault()}
   >
     <div className="space-y-1 text-center">
       <svg

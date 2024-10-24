@@ -1,89 +1,98 @@
-import React, { useState, useEffect } from "react";
-import { ipcRenderer } from "electron";
-import Header from "./components/Header";
-import FileUpload from "./components/FileUpload";
-import ChatMessages from "./components/ChatMessages";
-import QuestionInput from "./components/QuestionInput";
-import { ServiceFactory } from "../services/serviceFactory";
-import { LLMService, EmbeddingService } from "../services/interfaces";
+import React, { useEffect } from "react";
+import Layout from "../components/Layout";
+import MainContent from "../components/MainContent";
+import { useStore } from "../store";
+import { useDragAndDrop } from "../hooks/useDragAndDrop";
+import { mockEmbedDocument } from "../rag/embedding";
 
 const App: React.FC = () => {
-  const [serverStatus, setServerStatus] = useState<string>("");
-  const [ollamaTestResult, setOllamaTestResult] = useState<string>("");
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>(
-    "llama3.2:3b-instruct-fp16"
-  );
-  const [files, setFiles] = useState<File[]>([]);
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [question, setQuestion] = useState<string>("");
-  const [messages, setMessages] = useState<
-    Array<{ type: "user" | "system"; text: string }>
-  >([]);
+  const {
+    selectedModel,
+    question,
+    currentStep,
+    steps,
+    setServerStatus,
+    setAvailableModels,
+    addMessage,
+    setQuestion,
+    setCurrentStep,
+    initializeServices,
+    llmService,
+  } = useStore();
 
-  const llmService: LLMService = ServiceFactory.getLLMService("ollama");
-  const embeddingService: EmbeddingService =
-    ServiceFactory.getEmbeddingService("ollama");
+  const {
+    handleDrop,
+    handleDragOver,
+    handleDragLeave,
+    handleFileInput,
+    isSidebarOpen,
+    toggleSidebar,
+  } = useDragAndDrop();
 
   useEffect(() => {
-    checkServer();
-    listModels();
-  }, []);
+    initializeServices("ollama", "ollama");
+  }, [initializeServices]);
+
+  useEffect(() => {
+    if (llmService) {
+      checkServer();
+      listModels();
+    }
+  }, [llmService]);
 
   const checkServer = async () => {
-    const result = await llmService.checkServerStatus(selectedModel);
-    setServerStatus(result ? "Running" : "Not running");
-  };
-
-  const testOllama = async () => {
-    const result = await llmService.testModel(selectedModel);
-    setOllamaTestResult(result ? "Test passed" : "Test failed");
+    if (llmService) {
+      const result = await llmService.checkServerStatus(selectedModel);
+      setServerStatus(result ? "Running" : "Not running");
+    }
   };
 
   const listModels = async () => {
-    const models = await llmService.listModels();
-    setAvailableModels(models);
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    setFiles([...files, ...droppedFiles]);
-  };
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
-      setFiles([...files, ...newFiles]);
+    if (llmService) {
+      const models = await llmService.listModels();
+      setAvailableModels(models);
     }
   };
 
   const askQuestion = async () => {
-    if (!question.trim()) return;
+    if (!question.trim() || !llmService) return;
 
-    setMessages([...messages, { type: "user", text: question }]);
+    addMessage({ type: "user", text: question });
+    setCurrentStep(0);
+
+    // Simulate RAG process steps
+    for (let i = 0; i < steps.length; i++) {
+      setCurrentStep(i);
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate processing time
+    }
+
+    // Mock embedding
+    const embedding = await mockEmbedDocument(question);
+    console.log("Mock embedding vector:", embedding);
+
     const response = await llmService.generateResponse(question);
-    setMessages((prev) => [...prev, { type: "system", text: response }]);
+    addMessage({ type: "system", text: response });
     setQuestion("");
+    setCurrentStep(0);
   };
 
   return (
-    <div className="bg-gray-50 min-h-screen">
-      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <Header selectedModel={selectedModel} />
-        <FileUpload
-          isDragging={isDragging}
+    <div
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+    >
+      <Layout
+        selectedModel={selectedModel}
+        isSidebarOpen={isSidebarOpen}
+        toggleSidebar={toggleSidebar}
+      >
+        <MainContent
           handleDrop={handleDrop}
           handleFileInput={handleFileInput}
-        />
-        <ChatMessages messages={messages} />
-        <QuestionInput
-          question={question}
-          setQuestion={setQuestion}
           askQuestion={askQuestion}
         />
-      </div>
+      </Layout>
     </div>
   );
 };
