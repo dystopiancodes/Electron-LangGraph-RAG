@@ -1,0 +1,29 @@
+{
+  "name": "refactored-rag-app",
+  "version": "1.0.0",
+  "description": "Refactored RAG application",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "lint": "eslint -c .eslintrc --ext .ts ./src",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@langchain/community": "^0.0.15",
+    "@langchain/core": "^0.1.15",
+    "dotenv": "^16.3.1",
+    "electron-log": "^5.0.1",
+    "electron-store": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/electron": "^1.6.10",
+    "@types/node": "^20.8.2",
+    "@typescript-eslint/eslint-plugin": "^6.7.4",
+    "@typescript-eslint/parser": "^6.7.4",
+    "electron": "^26.3.0",
+    "eslint": "^8.50.0",
+    "typescript": "^5.2.2"
+  }
+}
