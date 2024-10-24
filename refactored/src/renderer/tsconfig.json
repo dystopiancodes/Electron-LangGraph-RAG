@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../dist/renderer",
+    "module": "ESNext",
+    "lib": ["DOM", "ES2015", "ES2016", "ES2017"],
+    "jsx": "react-jsx",
+    "isolatedModules": true,
+    "esModuleInterop": true
+  },
+  "include": ["./**/*"]
+}
